@@ -35,19 +35,24 @@ export function SearchResults({ initialQuery }: { initialQuery: string }) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
-      <button
-        type="button"
-        className="btn-ghost w-full justify-between lg:hidden"
-        aria-expanded={filtersOpen}
-        onClick={() => setFiltersOpen((value) => !value)}
-      >
-        Filters
-        {filtersOpen ? (
-          <ChevronUp className="h-4 w-4" aria-hidden="true" />
-        ) : (
-          <ChevronDown className="h-4 w-4" aria-hidden="true" />
-        )}
-      </button>
+      {/* Wrapper (not the button) carries the responsive hide: .btn-ghost sets
+          an unlayered display that would otherwise beat Tailwind's lg:hidden
+          and steal column 1 of the grid above. */}
+      <div className="lg:hidden">
+        <button
+          type="button"
+          className="btn-ghost w-full justify-between"
+          aria-expanded={filtersOpen}
+          onClick={() => setFiltersOpen((value) => !value)}
+        >
+          Filters
+          {filtersOpen ? (
+            <ChevronUp className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="h-4 w-4" aria-hidden="true" />
+          )}
+        </button>
+      </div>
       <aside
         aria-label="Filters"
         className={`${filtersOpen ? "block" : "hidden"} lg:block lg:sticky lg:top-24 lg:self-start`}
