@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, Star } from "lucide-react";
-import { getProductBySlug, products, getRelatedProducts } from "@/lib/data/products";
+import { getActiveProvider } from "@/lib/api/registry";
 import { getCategory } from "@/lib/data/categories";
 import { baseUrl } from "@/lib/utils/seo";
 import {
@@ -26,13 +26,14 @@ type ProductPageProps = {
   params: Promise<{ slug: string }>;
 };
 
-export function generateStaticParams() {
+export async function generateStaticParams() {
+  const products = await getActiveProvider().listProducts();
   return products.map((product) => ({ slug: product.slug }));
 }
 
 export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const product = getProductBySlug(slug);
+  const product = await getActiveProvider().getProduct(slug);
   if (!product) return { title: "Product not found" };
   const lowest = getLowestOffer(product.offers);
   const description = lowest
@@ -60,13 +61,14 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
 
 export default async function ProductPage({ params }: ProductPageProps) {
   const { slug } = await params;
-  const product = getProductBySlug(slug);
+  const provider = getActiveProvider();
+  const product = await provider.getProduct(slug);
   if (!product) notFound();
 
   const lowest = getLowestOffer(product.offers);
   const savings = getSavings(product.offers);
   const timing = evaluateBuyTiming(product);
-  const related = getRelatedProducts(product, 4);
+  const related = await provider.getRelatedProducts(product, 4);
   const bestStore = lowest ? getStore(lowest.storeId) : null;
   const bestHref = lowest && bestStore ? getAffiliateUrl(bestStore, product, { source: "product-hero" }) : "#";
 

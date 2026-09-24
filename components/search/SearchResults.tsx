@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { Product, SearchFilters, SearchSort } from "@/lib/types";
-import { searchProducts, getBrands, isProductUrl } from "@/lib/data/search";
+import { filterAndSortProducts, isProductUrl } from "@/lib/data/search-core";
 import { categories } from "@/lib/data/categories";
 import { stores } from "@/lib/data/stores";
 import { ProductCard } from "@/components/products/ProductCard";
@@ -16,7 +16,17 @@ const sorts: { value: SearchSort; label: string }[] = [
   { value: "recently-updated", label: "Recently updated" },
 ];
 
-export function SearchResults({ initialQuery }: { initialQuery: string }) {
+export function SearchResults({
+  initialQuery,
+  matches,
+  brands,
+}: {
+  initialQuery: string;
+  /** Query matches produced server-side by the active provider. */
+  matches: Product[];
+  /** Facet options for the brand filter, computed server-side. */
+  brands: string[];
+}) {
   const [query] = useState(initialQuery);
   const [filters, setFilters] = useState<SearchFilters>({ inStockOnly: true });
   const [sort, setSort] = useState<SearchSort>("lowest-price");
@@ -25,8 +35,8 @@ export function SearchResults({ initialQuery }: { initialQuery: string }) {
   const pasted = isProductUrl(query);
 
   const results = useMemo(
-    () => searchProducts(query, filters, sort),
-    [query, filters, sort],
+    () => filterAndSortProducts(matches, query, filters, sort),
+    [matches, query, filters, sort],
   );
 
   function update<K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) {
@@ -88,7 +98,7 @@ export function SearchResults({ initialQuery }: { initialQuery: string }) {
               onChange={(event) => update("brand", event.target.value || undefined)}
             >
               <option value="">All brands</option>
-              {getBrands().map((brand) => (
+              {brands.map((brand) => (
                 <option key={brand} value={brand}>
                   {brand}
                 </option>

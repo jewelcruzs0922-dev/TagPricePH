@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { SearchBar } from "@/components/search/SearchBar";
 import { SearchResults } from "@/components/search/SearchResults";
+import { getActiveProvider } from "@/lib/api/registry";
+import { getBrands } from "@/lib/data/search";
 
 type SearchPageProps = {
   searchParams: Promise<{ q?: string | string[] }>;
@@ -29,6 +31,10 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   const params = await searchParams;
   const q = Array.isArray(params.q) ? params.q[0] : (params.q ?? "");
 
+  const provider = getActiveProvider();
+  const matches = await provider.searchProducts(q);
+  const brands = getBrands();
+
   return (
     <div className="container-page py-8 sm:py-10">
       <div className="mb-6 max-w-2xl">
@@ -50,7 +56,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         </div>
       </div>
 
-      <SearchResults key={q} initialQuery={q} />
+      <SearchResults key={q} initialQuery={q} matches={matches} brands={brands} />
     </div>
   );
 }
