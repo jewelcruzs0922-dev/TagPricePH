@@ -1,4 +1,4 @@
-export const baseUrl = "https://tagpriceph.example";
+export const baseUrl = "https://tagpriceph.vercel.app";
 
 export const metadataConfig = {
   title: "TagPricePH — Find the Lowest Price. Know When to Buy.",

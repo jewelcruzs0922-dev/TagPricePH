@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Outfit } from "next/font/google";
 import { TagPricePHHeader } from "@/components/header/TagPricePHHeader";
 import { SiteFooter } from "@/components/footer/SiteFooter";
-import { metadataConfig } from "@/lib/utils/seo";
+import { baseUrl, metadataConfig } from "@/lib/utils/seo";
 import "./globals.css";
 
 const outfit = Outfit({
@@ -12,7 +12,7 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://tagpriceph.example"),
+  metadataBase: new URL(baseUrl),
   title: {
     default: metadataConfig.title,
     template: "%s | TagPricePH",
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_PH",
-    url: "https://tagpriceph.example",
+    url: baseUrl,
     siteName: "TagPricePH",
     title: metadataConfig.title,
     description: metadataConfig.description,
