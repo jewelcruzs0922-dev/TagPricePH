@@ -1,7 +1,5 @@
 import type { Store } from "@/lib/types";
 
-export const isDemoData = true;
-
 export const stores: Store[] = [
   { id: "tiktok", name: "TikTok Shop", color: "#111111", short: "♪" },
   { id: "lazada", name: "Lazada", color: "#F85606", short: "L" },

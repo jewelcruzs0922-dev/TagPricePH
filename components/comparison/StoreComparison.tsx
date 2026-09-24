@@ -3,6 +3,7 @@ import type { Product, StoreOffer } from "@/lib/types";
 import { getStore } from "@/lib/data/stores";
 import { getAffiliateUrl } from "@/lib/api/affiliate";
 import { formatDiff, formatPeso } from "@/lib/utils/format";
+import { formatRelativeTime, getFreshness } from "@/lib/utils/freshness";
 import { StoreLogo } from "@/components/ui/StoreLogo";
 
 type StoreComparisonProps = {
@@ -144,8 +145,29 @@ function StoreOfferIdentity({
             </span>
           )}
         </div>
+        <FreshnessNote offer={offer} />
       </div>
     </div>
+  );
+}
+
+/**
+ * Shows when this offer's price was last checked, and warns when the
+ * reading is too old to be presented as a current price.
+ */
+function FreshnessNote({ offer }: { offer: StoreOffer }) {
+  const state = getFreshness(offer.updatedAt);
+  const demo = offer.source === "demo";
+  const tone =
+    state === "fresh" ? "text-ink-3" : "text-wait";
+
+  return (
+    <p className={`mt-1 text-[12px] ${tone}`}>
+      {demo ? "Sample · " : ""}
+      checked {formatRelativeTime(offer.updatedAt)}
+      {state === "stale" ? " · may be out of date" : ""}
+      {state === "unavailable" ? " · price unavailable" : ""}
+    </p>
   );
 }
 
@@ -257,6 +279,7 @@ function StoreOfferRow({
             )}
           </div>
           <p className="text-[16px] font-bold text-ink">{formatPeso(offer.price)}</p>
+          <FreshnessNote offer={offer} />
         </div>
         <div className="flex flex-col items-end gap-1.5">
           {offer.inStock && diff > 0 && (

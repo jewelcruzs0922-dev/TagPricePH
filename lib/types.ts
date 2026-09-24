@@ -5,9 +5,33 @@ export type Store = {
   short: string;
 };
 
+/**
+ * Where a piece of price data came from.
+ * "demo"  — generated sample data, never presented as live.
+ * "live"  — observed from an authorized source.
+ */
+export type DataSource = "demo" | "live";
+
+export type Availability = "in_stock" | "out_of_stock";
+
+export type FreshnessState = "fresh" | "stale" | "unavailable";
+
 export type PricePoint = {
   date: string;
   price: number;
+};
+
+/**
+ * A single timestamped price reading for one offer.
+ * Append-only: current price = latest observation, history = the series.
+ */
+export type PriceObservation = {
+  id: string;
+  offerId: string;
+  price: number;
+  observedAt: string;
+  availability: Availability;
+  source: DataSource;
 };
 
 export type StoreOffer = {
@@ -16,6 +40,8 @@ export type StoreOffer = {
   url: string;
   updatedAt: string;
   inStock: boolean;
+  source: DataSource;
+  seller?: string;
 };
 
 export type BuyTiming = {

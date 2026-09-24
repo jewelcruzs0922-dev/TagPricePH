@@ -11,6 +11,7 @@ import {
   getSavings,
 } from "@/lib/pricing";
 import { formatPeso } from "@/lib/utils/format";
+import { formatRelativeTime, getFreshness } from "@/lib/utils/freshness";
 import { getStore } from "@/lib/data/stores";
 import { getAffiliateUrl } from "@/lib/api/affiliate";
 import { StoreComparison } from "@/components/comparison/StoreComparison";
@@ -161,7 +162,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
               </span>
             ))}
           </div>
-          {product.rating && (
+          {!isDemoData && product.rating && (
             <p className="mt-3 flex items-center gap-1.5 text-[14px] text-ink-2">
               <Star className="h-4 w-4 fill-accent text-accent" aria-hidden="true" />
               <strong className="text-ink">{product.rating.toFixed(1)}</strong>
@@ -204,7 +205,22 @@ export default async function ProductPage({ params }: ProductPageProps) {
               {savings > 0 && <SavingsBadge amount={savings} />}
             </div>
             <p className="mt-2 text-[13px] text-ink-3">
-              Sample data · last updated {DEMO_AS_OF} — not live prices
+              {isDemoData ? (
+                <>
+                  Sample data · last updated {DEMO_AS_OF} — not live prices
+                </>
+              ) : lowest ? (
+                <>
+                  {getFreshness(lowest.updatedAt) !== "fresh" && (
+                    <span className="text-wait">
+                      This price may be out of date ·{" "}
+                    </span>
+                  )}
+                  Last checked {formatRelativeTime(lowest.updatedAt)}
+                </>
+              ) : (
+                "Price unavailable"
+              )}
             </p>
 
             {lowest && bestStore && (

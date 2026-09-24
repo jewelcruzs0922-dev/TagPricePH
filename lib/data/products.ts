@@ -1,8 +1,6 @@
 import type { PricePoint, Product, StoreOffer } from "@/lib/types";
 import { slugify } from "@/lib/utils/format";
-
-export const isDemoData = true;
-export const DEMO_AS_OF = "September 25, 2026";
+import { DEMO_MODE } from "@/lib/config";
 
 function mulberry32(seed: number) {
   let a = seed;
@@ -61,6 +59,7 @@ function offer(storeId: string, price: number, url: string, daysAgo = 0): StoreO
     url,
     updatedAt: updated.toISOString(),
     inStock: true,
+    source: "demo",
   };
 }
 
@@ -3491,6 +3490,37 @@ const seeds: ProductSeed[] = [
 ];
 
 export const products: Product[] = seeds.map(withSlug);
+
+/**
+ * True while the catalog's prices are not real observations.
+ *
+ * OR'd with DEMO_MODE so the label can never understate the situation:
+ * flipping the flag off while sample seeds are still loaded keeps the
+ * "sample data" warning visible rather than presenting it as live pricing.
+ */
+const catalogIsDemo = products.every((product) =>
+  product.offers.every((offer) => offer.source === "demo"),
+);
+export const isDemoData = DEMO_MODE || catalogIsDemo;
+
+/**
+ * Newest offer timestamp in the catalog — no longer a hardcoded date.
+ * In demo mode this is the sample data's own "as of" stamp.
+ */
+export const DEMO_AS_OF = new Intl.DateTimeFormat("en-PH", {
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+}).format(
+  products.reduce((latest, product) => {
+    const newest = product.offers.reduce(
+      (max, offer) => Math.max(max, Date.parse(offer.updatedAt)),
+      0,
+    );
+    return Math.max(latest, newest);
+  }, 0),
+);
+
 
 export const featuredProduct =
   products.find((product) => product.slug === "iphone-16-128gb") ?? products[0];

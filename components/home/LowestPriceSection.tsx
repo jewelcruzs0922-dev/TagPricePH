@@ -197,9 +197,11 @@ export function LowestPriceSection({ product }: { product: Product }) {
               <div>
                 <p className="text-[15px] font-bold text-success">{timing.label}</p>
                 <p className="text-[14px] leading-snug text-ink-2">
-                  This price is{" "}
-                  {Math.abs(timing.percentVsAverage) || 17}% lower than its recent
-                  average.
+                  {Math.abs(timing.percentVsAverage) > 0
+                    ? `This price is ${Math.abs(timing.percentVsAverage)}% ${
+                        timing.percentVsAverage < 0 ? "lower" : "higher"
+                      } than its recent average.`
+                    : "This price is in line with its recent average."}
                 </p>
               </div>
             </div>
