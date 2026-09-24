@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getProductBySlug } from "@/lib/data/products";
+import { NextRequest, NextResponse, after } from "next/server";
+import { getActiveProvider } from "@/lib/api/registry";
 import {
   affiliateConfig,
   resolveOfferDestination,
 } from "@/lib/api/affiliate";
+import { recordClick } from "@/lib/db/clicks";
 
 type RouteContext = {
   params: Promise<{ store: string; product: string }>;
@@ -18,12 +19,12 @@ type RouteContext = {
  *  3. attach affiliate parameters ONLY when that marketplace is configured
  *  4. forward our own internal attribution (campaign/source)
  *
- * Click logging is intentionally not stubbed here — it needs persistence
- * (Phase: click tracking) and must not pretend to record anything before then.
+ * Clicks are logged after the response is sent (see `after` below), so
+ * analytics never adds latency to the redirect and can never block it.
  */
 export async function GET(request: NextRequest, context: RouteContext) {
   const { store: storeId, product: productSlug } = await context.params;
-  const product = getProductBySlug(productSlug);
+  const product = await getActiveProvider().getProduct(productSlug);
 
   if (!product) {
     return NextResponse.redirect(new URL("/search", request.url), 302);
@@ -53,5 +54,28 @@ export async function GET(request: NextRequest, context: RouteContext) {
   if (campaign) url.searchParams.set("campaign", campaign);
   if (source) url.searchParams.set("source", source);
 
-  return NextResponse.redirect(url.toString(), 302);
+  const destinationUrl = url.toString();
+
+  // Scheduled after the response is flushed: the visitor is never kept waiting
+  // on Postgres, and a logging failure can never break the redirect.
+  after(async () => {
+    try {
+      await recordClick({
+        productSlug,
+        storeId,
+        placement: source || "unknown",
+        campaign,
+        destination: destinationUrl,
+        referrer: request.headers.get("referer"),
+        userAgent: request.headers.get("user-agent"),
+      });
+    } catch (error) {
+      console.error(
+        "Failed to record click_events row:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  });
+
+  return NextResponse.redirect(destinationUrl, 302);
 }

@@ -88,6 +88,17 @@ async function main() {
     );
     check("source column present", Boolean(columnMap.source), columnMap.source?.udt_name);
 
+    const { rows: clickCols } = await client.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'click_events' ORDER BY ordinal_position
+    `);
+    const clickColNames = clickCols.map((row) => row.column_name);
+    check(
+      "click_events has placement + campaign",
+      ["placement", "campaign"].every((name) => clickColNames.includes(name)),
+      clickColNames.join(", "),
+    );
+
     const { rows: applied } = await client.query("SELECT version FROM schema_migrations");
     check("0001_init.sql recorded as applied", applied.some((r) => r.version === "0001_init.sql"), applied.map((r) => r.version).join(", "));
 
