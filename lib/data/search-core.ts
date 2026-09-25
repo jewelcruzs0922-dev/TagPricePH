@@ -1,5 +1,6 @@
 import type { Product, SearchFilters, SearchSort } from "@/lib/types";
 import { getLowestOffer, getPriceDropPercent } from "@/lib/pricing";
+import { matchQueryIn, type QueryMatch } from "@/lib/search/typo";
 
 /**
  * Catalog-free search primitives.
@@ -16,9 +17,68 @@ export function isProductUrl(query: string): boolean {
   return /^https?:\/\//.test(value) && marketplaceHosts.some((host) => value.includes(host));
 }
 
+/** The text a search query is matched against, lowercased. */
+function searchHaystack(product: Product): string {
+  return `${product.name} ${product.brand} ${product.category} ${product.sku ?? ""} ${(product.keywords ?? []).join(" ")}`.toLowerCase();
+}
+
+/**
+ * Selects query matches in two passes: every exact (substring) match first,
+ * and the typo-tolerant pass only when the exact pass found nothing. A query
+ * that works today therefore returns exactly what it returned before Phase
+ * 11; fuzzy results only ever appear where the query used to come up empty.
+ */
+function selectByQuery(products: Product[], normalized: string): Product[] {
+  if (!normalized) return [...products];
+  const tokens = normalized.split(/\s+/);
+  const exact: Product[] = [];
+  const fuzzy: Product[] = [];
+  for (const product of products) {
+    const match = matchQueryIn(searchHaystack(product), tokens);
+    if (match === "exact") exact.push(product);
+    else if (match === "fuzzy") fuzzy.push(product);
+  }
+  return exact.length > 0 ? exact : fuzzy;
+}
+
+/**
+ * How a whole result set was matched, for the note the search page shows.
+ *
+ * "fuzzy" means nothing in the candidate set matched exactly — the query
+ * came up empty before Phase 11 — so the page can say so instead of silently
+ * showing near-misses as if they were the answer.
+ */
+export function queryMatchMode(products: Product[], query: string): QueryMatch {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return "exact";
+  const tokens = normalized.split(/\s+/);
+  let sawFuzzy = false;
+  for (const product of products) {
+    const match = matchQueryIn(searchHaystack(product), tokens);
+    if (match === "exact") return "exact";
+    if (match === "fuzzy") sawFuzzy = true;
+  }
+  return sawFuzzy ? "fuzzy" : "none";
+}
+
 /** The landing state of the filters panel — shared so SSR and client agree. */
 export const DEFAULT_FILTERS: SearchFilters = { inStockOnly: true };
 export const DEFAULT_SORT: SearchSort = "lowest-price";
+
+/**
+ * The browser-facing form of a result set.
+ *
+ * `priceHistory` is server-only bulk: 150 products × 90 points serialized to
+ * the client turned an empty search into over a megabyte of HTML, and the
+ * client never reads it — filtering sorts on name/brand/sku/keywords/offers,
+ * the drop uses `previousPrice`, and the verdict arrives separately as
+ * `timings` (resolved from the recorded series before this runs). The array
+ * is emptied rather than removed so `evaluateBuyTiming(product)` still
+ * answers honestly ("not enough history") if a card renders without a timing.
+ */
+export function toClientProducts(products: Product[]): Product[] {
+  return products.map((product) => ({ ...product, priceHistory: [] }));
+}
 
 export function filterAndSortProducts(
   products: Product[],
@@ -31,11 +91,7 @@ export function filterAndSortProducts(
   // Pasted marketplace links never reach this function with their URL intact:
   // `runSearch` resolves them through the Phase 5 matcher first and passes an
   // already-resolved product set with an empty query.
-  let results = products.filter((product) => {
-    if (!normalized) return true;
-    const haystack = `${product.name} ${product.brand} ${product.category} ${product.sku ?? ""} ${(product.keywords ?? []).join(" ")}`.toLowerCase();
-    return normalized.split(/\s+/).every((token) => haystack.includes(token));
-  });
+  let results = selectByQuery(products, normalized);
 
   if (filters.category) {
     results = results.filter((product) => product.category === filters.category);
@@ -96,12 +152,16 @@ export function filterAndSortProducts(
 export function filterSuggestions(products: Product[], query: string): Product[] {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return [];
-  return products
-    .filter((product) => {
-      const haystack = `${product.name} ${product.brand} ${(product.keywords ?? []).join(" ")}`.toLowerCase();
-      return normalized.split(/\s+/).every((token) => haystack.includes(token));
-    })
-    .slice(0, 5);
+  const tokens = normalized.split(/\s+/);
+  const exact: Product[] = [];
+  const fuzzy: Product[] = [];
+  for (const product of products) {
+    const haystack = `${product.name} ${product.brand} ${(product.keywords ?? []).join(" ")}`.toLowerCase();
+    const match = matchQueryIn(haystack, tokens);
+    if (match === "exact") exact.push(product);
+    else if (match === "fuzzy") fuzzy.push(product);
+  }
+  return (exact.length > 0 ? exact : fuzzy).slice(0, 5);
 }
 
 export function getBrandsFrom(products: Product[]): string[] {

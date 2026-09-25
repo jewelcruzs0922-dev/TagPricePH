@@ -5,6 +5,7 @@ import {
   DEFAULT_SORT,
   filterAndSortProducts,
   isProductUrl,
+  queryMatchMode,
 } from "@/lib/data/search-core";
 import { resolveListingUrl } from "@/lib/matching";
 
@@ -23,6 +24,15 @@ import { resolveListingUrl } from "@/lib/matching";
  */
 
 export { DEFAULT_FILTERS, DEFAULT_SORT };
+
+/**
+ * How many results one request hands to the browser. The server holds the
+ * whole sorted result set and only ships a screenful; the client asks for the
+ * next window when the user wants more. 48 fills a four-across grid twelve
+ * rows deep, so the first paint looks complete without the catalog itself
+ * crossing the wire.
+ */
+export const SEARCH_PAGE_SIZE = 48;
 
 export type SearchRequest = {
   q: string;
@@ -60,5 +70,15 @@ export async function runSearch(request: SearchRequest): Promise<SearchOutcome> 
   }
 
   const matches = await provider.searchProducts(q);
-  return { results: filterAndSortProducts(matches, q, filters, sort), note: null };
+  const results = filterAndSortProducts(matches, q, filters, sort);
+
+  // Phase 11: results that only exist because the typo pass widened the
+  // query must say so — presenting near-misses as a plain answer would be
+  // the same dishonesty as a stale price shown as current.
+  const note =
+    results.length > 0 && queryMatchMode(matches, q) === "fuzzy"
+      ? `No exact matches for “${q.trim()}” — showing close matches instead.`
+      : null;
+
+  return { results, note };
 }

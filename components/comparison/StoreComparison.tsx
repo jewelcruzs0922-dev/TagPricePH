@@ -12,15 +12,31 @@ type StoreComparisonProps = {
   showCta?: boolean;
 };
 
+const CONDITION_LABELS: Record<NonNullable<StoreOffer["condition"]>, string> = {
+  bundle: "Bundle",
+  different_variant: "Different variant",
+};
+
+/**
+ * Whether an offer may claim this product's lowest price.
+ *
+ * An out-of-stock listing cannot be bought, and a listing a provider reports
+ * as a different variant is a different product — neither may be crowned the
+ * lowest price of this one.
+ */
+function canRank(offer: StoreOffer): boolean {
+  return offer.inStock && offer.condition !== "different_variant";
+}
+
 export function StoreComparison({
   product,
   variant = "table",
   showCta = true,
 }: StoreComparisonProps) {
   const sorted = [...product.offers].sort(
-    (a, b) => Number(b.inStock) - Number(a.inStock) || a.price - b.price,
+    (a, b) => Number(canRank(b)) - Number(canRank(a)) || a.price - b.price,
   );
-  const bestPrice = sorted.find((offer) => offer.inStock)?.price ?? 0;
+  const bestPrice = sorted.find(canRank)?.price ?? 0;
 
   if (variant === "stack") {
     return (
@@ -31,7 +47,7 @@ export function StoreComparison({
               offer={offer}
               bestPrice={bestPrice}
               product={product}
-              isBest={index === 0 && offer.inStock}
+              isBest={index === 0 && canRank(offer)}
               stacked
             />
           </li>
@@ -50,7 +66,7 @@ export function StoreComparison({
                 offer={offer}
                 bestPrice={bestPrice}
                 product={product}
-                isBest={index === 0 && offer.inStock}
+                isBest={index === 0 && canRank(offer)}
                 stacked
               />
             </li>
@@ -58,7 +74,8 @@ export function StoreComparison({
         </ul>
         {showCta && (
           <p className="mt-3 text-[13px] text-ink-2">
-            Sorted by lowest price. TagPricePH does not sell these products.
+            Sorted by lowest listed price. Shipping and fees are not included.
+            TagPricePH does not sell these products.
           </p>
         )}
       </div>
@@ -66,7 +83,7 @@ export function StoreComparison({
       <div className="hidden overflow-x-auto rounded-2xl border border-line bg-white sm:block">
         <table className="w-full border-collapse text-left">
           <caption className="sr-only">
-            Store offers for {product.name}, sorted from lowest price
+            Store offers for {product.name}, sorted from lowest listed price
           </caption>
           <thead>
             <tr className="border-b border-line bg-cream/70 text-[13px] font-semibold uppercase tracking-wide text-ink-3">
@@ -91,13 +108,13 @@ export function StoreComparison({
                 className="border-b border-line/80 last:border-b-0"
               >
                 <td className="px-4 py-3.5">
-                  <StoreOfferIdentity offer={offer} isBest={index === 0 && offer.inStock} />
+                  <StoreOfferIdentity offer={offer} isBest={index === 0 && canRank(offer)} />
                 </td>
                 <td className="px-4 py-3.5 text-right text-[16px] font-bold text-ink">
                   {formatPeso(offer.price)}
                 </td>
                 <td className="px-4 py-3.5 text-right">
-                  {offer.inStock ? (
+                  {canRank(offer) ? (
                     <DifferenceChip diff={offer.price - bestPrice} />
                   ) : (
                     <span className="text-[13px] text-ink-3">—</span>
@@ -112,7 +129,8 @@ export function StoreComparison({
         </table>
         {showCta && (
           <div className="border-t border-line bg-cream/50 px-4 py-3 text-[13px] text-ink-2">
-            Sorted by lowest price. TagPricePH does not sell these products.
+            Sorted by lowest listed price. Shipping and fees are not included.
+            TagPricePH does not sell these products.
           </div>
         )}
       </div>
@@ -154,12 +172,17 @@ function StoreOfferIdentity({
         <div className="flex flex-wrap items-center gap-2">
           {isBest && (
             <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-ink">
-              Best price
+              Lowest listed price
             </span>
           )}
           {!offer.inStock && (
             <span className="rounded-full border border-line bg-cream px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-ink-3">
               Out of stock
+            </span>
+          )}
+          {offer.condition && (
+            <span className="rounded-full border border-line bg-cream px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-ink-3">
+              {CONDITION_LABELS[offer.condition]}
             </span>
           )}
         </div>
@@ -173,7 +196,7 @@ function DifferenceChip({ diff, inline = false }: { diff: number; inline?: boole
   if (diff <= 0) {
     return (
       <span className="inline-flex rounded-full bg-accent px-2.5 py-1 text-[12px] font-bold text-ink">
-        Best price
+        Lowest listed price
       </span>
     );
   }
@@ -271,8 +294,13 @@ function StoreOfferRow({
           <div className="flex items-center gap-2">
             <p className="truncate text-[15px] font-semibold text-ink">{store.name}</p>
             {isBest && (
-              <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold uppercase">
-                Best
+              <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold uppercase">
+                Lowest listed price
+              </span>
+            )}
+            {offer.condition && (
+              <span className="shrink-0 rounded-full border border-line bg-cream px-2 py-0.5 text-[11px] font-bold uppercase text-ink-3">
+                {CONDITION_LABELS[offer.condition]}
               </span>
             )}
           </div>
@@ -280,7 +308,7 @@ function StoreOfferRow({
           <OfferFreshness offer={offer} />
         </div>
         <div className="flex flex-col items-end gap-1.5">
-          {offer.inStock && diff > 0 && (
+          {canRank(offer) && diff > 0 && (
             <span className="text-[13px] font-semibold text-ink-2">
               {formatDiff(diff)}
             </span>

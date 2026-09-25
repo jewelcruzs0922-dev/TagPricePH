@@ -3,9 +3,9 @@ import { SearchBar } from "@/components/search/SearchBar";
 import { SearchResults } from "@/components/search/SearchResults";
 import { getBrands } from "@/lib/data/search";
 import { isDemoData } from "@/lib/data/products";
-import { isProductUrl } from "@/lib/data/search-core";
+import { isProductUrl, toClientProducts } from "@/lib/data/search-core";
 import { resolveBuyTimings } from "@/lib/db/observations";
-import { DEFAULT_FILTERS, DEFAULT_SORT, runSearch } from "@/lib/search/run-search";
+import { DEFAULT_FILTERS, DEFAULT_SORT, SEARCH_PAGE_SIZE, runSearch } from "@/lib/search/run-search";
 
 type SearchPageProps = {
   searchParams: Promise<{ q?: string | string[] }>;
@@ -49,7 +49,10 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   });
   const brands = getBrands();
   const pastedLink = isProductUrl(q);
-  const timings = await resolveBuyTimings(results);
+  // The count is the full result set; the first paint only carries a window
+  // of it. "Show more" asks the server for the next slice.
+  const window = results.slice(0, SEARCH_PAGE_SIZE);
+  const timings = await resolveBuyTimings(window);
 
   return (
     <div className="container-page py-8 sm:py-10">
@@ -84,9 +87,10 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
       <SearchResults
         key={q}
         initialQuery={q}
-        initialResults={results}
+        initialResults={toClientProducts(window)}
         initialNote={note}
         initialTimings={timings}
+        initialTotal={results.length}
         brands={brands}
       />
     </div>

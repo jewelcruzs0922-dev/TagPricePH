@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 /**
- * Phase 3 verification: proves the ingestion contract refuses to turn
- * generated numbers into a price history, using planIngestion() from
+ * Phase 3 + Phase 18 verification: proves the ingestion contract refuses to
+ * turn generated numbers into a price history, and that impossible readings
+ * are screened out per row — using planIngestion() and screenRows() from
  * lib/data/ingest.ts and the same SQL the app writes with.
  *
- * Two halves:
+ * Three halves:
  *  - the refusal rules, exercised purely (no provider that may report real
  *    prices exists yet, so this is where the guard is proven);
+ *  - the Phase 18 row screening (non-positive, future, duplicate, and
+ *    implausible-move refusals) — also pure, so the exact shipped code is
+ *    what runs;
  *  - a write/read round trip against Neon for the batches an authorized
  *    provider would be allowed to send, including the mixed-source batch that
  *    must taint its series.
@@ -21,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { toCents } from "../lib/db/money.ts";
-import { planIngestion } from "../lib/data/ingest.ts";
+import { MAX_PLAUSIBLE_CHANGE, planIngestion, rowKey, screenRows } from "../lib/data/ingest.ts";
 import {
   INSERT_OBSERVATIONS_SQL,
   PRODUCT_SERIES_SQL,
@@ -91,6 +95,7 @@ function insertRows(client, rows) {
     rows.map((row) => row.availability),
     rows.map((row) => row.source),
     rows.map((row) => row.observedAt),
+    rows.map((row) => row.providerId),
   ]);
 }
 
@@ -149,6 +154,13 @@ async function main() {
       JSON.stringify(mixed),
     );
 
+    check(
+      "every planned row carries its provider as provenance",
+      allowed.authorized === true &&
+        allowed.rows.every((row) => row.providerId === AUTHORIZED_PROVIDER.id),
+      JSON.stringify(allowed.authorized ? allowed.rows : allowed),
+    );
+
     const undated = product("__verify-ingest-undated__", [
       offer("shopee", 44990, "live", "not-a-timestamp"),
     ]);
@@ -157,6 +169,94 @@ async function main() {
       "an unreadable observation time is refused instead of guessed",
       badTime.authorized === false && badTime.reason.includes("unreadable observation time"),
       JSON.stringify(badTime),
+    );
+
+    console.log("\nRow screening (Phase 18)");
+    check(
+      "plausibility limit is 85% (decimal/currency errors, real sales allowed)",
+      MAX_PLAUSIBLE_CHANGE === 0.85,
+      String(MAX_PLAUSIBLE_CHANGE),
+    );
+
+    const base = {
+      productSlug: "__verify-screen__",
+      storeId: "shopee",
+      price: 45990,
+      observedAt: day(1),
+      availability: "in_stock",
+      source: "live",
+      providerId: AUTHORIZED_PROVIDER.id,
+    };
+    const row = (overrides) => ({ ...base, ...overrides });
+    const none = new Map();
+
+    const plain = screenRows([row({ price: 45990 }), row({ storeId: "lazada", price: 44990 })], none);
+    check(
+      "a clean batch passes screening untouched",
+      plain.accepted.length === 2 && plain.rejected.length === 0,
+      JSON.stringify(plain.rejected),
+    );
+
+    const nonPositive = screenRows([row({ price: 0 }), row({ price: -500 })], none);
+    check(
+      "non-positive prices are refused",
+      nonPositive.accepted.length === 0 &&
+        nonPositive.rejected.every((r) => r.reason.includes("not a positive")),
+      JSON.stringify(nonPositive.rejected),
+    );
+
+    const future = screenRows(
+      [row({ observedAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString() })],
+      none,
+    );
+    check(
+      "a future observation time is refused",
+      future.accepted.length === 0 && future.rejected[0]?.reason.includes("future"),
+      JSON.stringify(future.rejected),
+    );
+
+    const duplicated = screenRows([row({ price: 45990 }), row({ price: 45990 })], none);
+    check(
+      "a duplicate row in the same batch is refused once",
+      duplicated.accepted.length === 1 &&
+        duplicated.rejected[0]?.reason.includes("duplicate"),
+      JSON.stringify(duplicated.rejected),
+    );
+
+    const previous = new Map([[rowKey("__verify-screen__", "shopee"), 45990]]);
+    const droppedZero = screenRows([row({ price: 4599 })], previous);
+    check(
+      "a dropped-zero move (-90%) is refused as implausible",
+      droppedZero.accepted.length === 0 &&
+        droppedZero.rejected[0]?.reason.includes("down 90%"),
+      JSON.stringify(droppedZero.rejected),
+    );
+
+    const currencySlip = screenRows([row({ price: 459900 })], previous);
+    check(
+      "an unconverted-currency move (+900%) is refused as implausible",
+      currencySlip.accepted.length === 0 &&
+        currencySlip.rejected[0]?.reason.includes("up 900%"),
+      JSON.stringify(currencySlip.rejected),
+    );
+
+    const flashSale = screenRows([row({ price: 14990 })], previous);
+    check(
+      "an aggressive but real sale (-67%) still passes",
+      flashSale.accepted.length === 1 && flashSale.rejected.length === 0,
+      JSON.stringify(flashSale.rejected),
+    );
+
+    const mixedBatch = screenRows(
+      [row({ price: 44990 }), row({ price: 4599 })],
+      previous,
+    );
+    check(
+      "one bad row never blocks the good rows beside it",
+      mixedBatch.accepted.length === 1 &&
+        mixedBatch.accepted[0].price === 44990 &&
+        mixedBatch.rejected.length === 1,
+      JSON.stringify(mixedBatch),
     );
 
     console.log("\nSample catalog");

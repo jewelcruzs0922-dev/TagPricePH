@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { BuyTiming, Product } from "@/lib/types";
 import {
   evaluateBuyTiming,
@@ -111,12 +112,13 @@ export async function LowestPriceSection({ product }: { product: Product }) {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-[0.85fr_1.1fr_1fr] lg:gap-5">
           {/* Product card */}
           <div className="card flex flex-col p-5">
-            <div className="h-64 overflow-hidden rounded-2xl bg-[#F3F1EA]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+            <div className="relative h-64 overflow-hidden rounded-2xl bg-[#F3F1EA]">
+              <Image
                 src={product.image}
                 alt={product.name}
-                className="h-full w-full object-cover"
+                fill
+                sizes="(min-width: 1024px) 30vw, (min-width: 768px) 45vw, 90vw"
+                className="object-cover"
               />
             </div>
             <h2
@@ -201,7 +203,7 @@ export async function LowestPriceSection({ product }: { product: Product }) {
                       </span>
                       {isBest ? (
                         <span className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-[11px] font-bold text-ink">
-                          Best price
+                          Lowest listed price
                         </span>
                       ) : (
                         <span className="hidden sm:inline" />

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, Star } from "lucide-react";
 import { getActiveProvider } from "@/lib/api/registry";
@@ -8,6 +9,7 @@ import { baseUrl } from "@/lib/utils/seo";
 import {
   evaluateBuyTiming,
   getLowestOffer,
+  getRecordedPriceDrop,
   getSavings,
 } from "@/lib/pricing";
 import { formatPeso } from "@/lib/utils/format";
@@ -17,6 +19,7 @@ import { getAffiliateUrl } from "@/lib/api/affiliate";
 import { buildMetaDescription, buildProductJsonLd } from "@/lib/trust";
 import { resolveBuyTimings, resolvePriceSeries } from "@/lib/db/observations";
 import { StoreComparison } from "@/components/comparison/StoreComparison";
+import { ProductViewTracker } from "@/components/analytics/ProductViewTracker";
 import { SavingsBadge } from "@/components/comparison/SavingsBadge";
 import { BuyTimingIndicator } from "@/components/products/BuyTimingIndicator";
 import { PriceHistoryChart } from "@/components/price-history/PriceHistoryChart";
@@ -78,6 +81,9 @@ export default async function ProductPage({ params }: ProductPageProps) {
   const savings = getSavings(product.offers);
   const series = await resolvePriceSeries(product);
   const timing = evaluateBuyTiming(product, series.points);
+  // Null while the observation store is empty — the demo reference price must
+  // never be dressed up as a recorded drop.
+  const recordedDrop = getRecordedPriceDrop(series, lowest?.price ?? 0);
   const related = await provider.getRelatedProducts(product, 4);
   const relatedTimings = await resolveBuyTimings(related);
   const bestStore = lowest ? getStore(lowest.storeId) : null;
@@ -116,6 +122,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }}
       />
+      <ProductViewTracker slug={product.slug} />
 
       <nav aria-label="Breadcrumb" className="mb-5">
         <ol className="flex flex-wrap items-center gap-2 text-[14px] text-ink-2">
@@ -141,13 +148,13 @@ export default async function ProductPage({ params }: ProductPageProps) {
       <div className="grid gap-6 md:grid-cols-[1.1fr_1fr]">
         <div className="card p-5">
           <div className="aspect-[4/3] overflow-hidden rounded-2xl bg-cream">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <Image
               src={product.image}
               alt={product.name}
               className="h-full w-full object-contain"
               width={900}
               height={675}
+              priority
             />
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -194,7 +201,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
             <div className="mt-5 flex flex-wrap items-end gap-4">
               <div>
                 <p className="text-[13px] font-semibold uppercase tracking-wide text-ink-3">
-                  Lowest price
+                  Lowest listed price
                 </p>
                 <p className="text-[40px] font-extrabold leading-none tracking-tight text-ink">
                   {lowest ? formatPeso(lowest.price) : "—"}
@@ -202,6 +209,12 @@ export default async function ProductPage({ params }: ProductPageProps) {
               </div>
               {savings > 0 && <SavingsBadge amount={savings} />}
             </div>
+            {recordedDrop && (
+              <p className="mt-2 text-[14px] font-semibold text-success">
+                {recordedDrop.detail}
+                {recordedDrop.averageDetail ? ` · ${recordedDrop.averageDetail}` : ""}
+              </p>
+            )}
             <p className="mt-2 text-[13px] text-ink-3">
               {isDemoData ? (
                 <>

@@ -3,7 +3,7 @@ export function formatPeso(amount: number): string {
 }
 
 export function formatDiff(amount: number): string {
-  if (amount === 0) return "Best price";
+  if (amount === 0) return "Lowest listed price";
   return `+₱${amount.toLocaleString("en-PH")}`;
 }
 

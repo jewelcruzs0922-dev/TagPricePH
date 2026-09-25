@@ -7,7 +7,9 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        disallow: "/go/",
+        // /go/ keeps outbound hops out of the index; /admin is the gated
+        // operator dashboard and is never linked from the public site.
+        disallow: ["/go/", "/admin"],
       },
     ],
     sitemap: `${baseUrl}/sitemap.xml`,

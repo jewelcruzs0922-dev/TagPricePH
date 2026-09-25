@@ -29,6 +29,7 @@ export function buildSearchUrl(
   query: string,
   filters: SearchFilters,
   sort: SearchSort,
+  page = 1,
 ): string {
   const params = new URLSearchParams();
   params.set("q", query);
@@ -41,7 +42,15 @@ export function buildSearchUrl(
   params.set("priceDropOnly", filters.priceDropOnly ? "1" : "0");
   params.set("inStockOnly", filters.inStockOnly ? "1" : "0");
   params.set("sort", sort);
+  if (page > 1) params.set("page", String(page));
   return `/api/search?${params.toString()}`;
+}
+
+/** Clamped so a crafted URL cannot ask for an unbounded offset. */
+export function parsePage(params: URLSearchParams): number {
+  const parsed = Number(params.get("page") ?? "1");
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.min(Math.trunc(parsed), 1_000);
 }
 
 function readBool(value: string | null): boolean | undefined {

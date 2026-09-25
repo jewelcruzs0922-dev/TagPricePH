@@ -8,14 +8,22 @@
  * Append a batch of observations in one round trip.
  *
  * Column order is positional and must stay aligned with the unnest arrays in
- * lib/db/observations.ts: product, store, price, availability, source, time.
+ * lib/db/observations.ts: product, store, price, availability, source, time,
+ * provider.
+ *
+ * ON CONFLICT DO NOTHING is backend §27's retry-safety at the statement
+ * level: a re-run of the same batch (same product/store/source/instant, the
+ * 0008 unique index) skips the rows it already wrote instead of failing or
+ * duplicating them — safe for cron retries, and invisible to callers, which
+ * see ingested = rows actually written via rowCount.
  */
 export const INSERT_OBSERVATIONS_SQL = `
   INSERT INTO price_observations
-    (product_slug, store_id, price_cents, availability, source, observed_at)
+    (product_slug, store_id, price_cents, availability, source, observed_at, provider_id)
   SELECT * FROM unnest(
-    $1::text[], $2::text[], $3::integer[], $4::text[], $5::text[], $6::timestamptz[]
+    $1::text[], $2::text[], $3::integer[], $4::text[], $5::text[], $6::timestamptz[], $7::text[]
   )
+  ON CONFLICT DO NOTHING
 `;
 
 /**
@@ -51,4 +59,19 @@ export const PRODUCT_SERIES_FOR_SLUGS_SQL = `
    WHERE product_slug = ANY($1::text[])
    GROUP BY product_slug, to_char(date_trunc('day', observed_at), 'YYYY-MM-DD')
    ORDER BY product_slug ASC, 2 ASC
+`;
+
+/**
+ * The last recorded price per (product, store) for a batch of candidate keys —
+ * exactly what screenRows() needs to refuse impossible moves at ingestion
+ * (Phase 18). One statement for the whole batch, like every other read here.
+ */
+export const LAST_PRICES_SQL = `
+  SELECT DISTINCT ON (product_slug, store_id)
+         product_slug, store_id, price_cents
+    FROM price_observations
+   WHERE (product_slug, store_id) IN (
+     SELECT * FROM unnest($1::text[], $2::text[])
+   )
+   ORDER BY product_slug, store_id, observed_at DESC
 `;

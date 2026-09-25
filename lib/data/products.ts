@@ -1,6 +1,9 @@
 import type { PricePoint, Product, StoreOffer } from "@/lib/types";
-import { slugify } from "@/lib/utils/format";
-import { DEMO_MODE } from "@/lib/config";
+// Relative, extension-ful imports (not @/ aliases) so plain Node can load
+// this catalog for the database seed — scripts/seed.mjs imports it directly,
+// with no bundler in the loop.
+import { slugify } from "../utils/format.ts";
+import { DEMO_MODE } from "../config.ts";
 
 function mulberry32(seed: number) {
   let a = seed;

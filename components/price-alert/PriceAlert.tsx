@@ -1,119 +1,124 @@
 "use client";
 
-import {
-  useCallback,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { BellRing, Check, Trash2 } from "lucide-react";
+import type { PriceAlertView } from "@/lib/data/alert-events";
+import { fromCents } from "@/lib/db/money";
 import { formatPeso } from "@/lib/utils/format";
 
-export type StoredAlert = {
-  id: string;
-  productSlug: string;
-  productName: string;
-  targetPrice: number;
-  createdAt: string;
-};
+/**
+ * Price alerts against the server API.
+ *
+ * There is no account system: the email a shopper types is the entire
+ * identity, stored only so the same alerts can be found from another device.
+ * The address is remembered on this device for convenience, and the copy says
+ * plainly that nothing is emailed — an alert is *flagged on the alerts page*
+ * when the price reaches the target, which is what the server actually does.
+ */
 
-const STORAGE_KEY = "tagpriceph-alerts-v1";
-const EVENT_NAME = "tagpriceph-alerts-changed";
-const LEGACY_STORAGE_KEY = "priceph-alerts-v1";
+const EMAIL_KEY = "tagpriceph-alert-email";
+/**
+ * Mailbox access tokens, keyed by email (§25): the server returns a token
+ * exactly once — on the POST that created the mailbox — and every later call
+ * must present it as `x-alert-token`. Storing per email means filing under a
+ * second address on this device cannot evict the first mailbox's key.
+ */
+const TOKENS_KEY = "tagpriceph-alert-tokens";
 
-if (typeof window !== "undefined") {
+function rememberEmail(email: string) {
   try {
-    if (window.localStorage.getItem(STORAGE_KEY) === null) {
-      const legacy = window.localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (legacy !== null) {
-        window.localStorage.setItem(STORAGE_KEY, legacy);
-        window.localStorage.removeItem(LEGACY_STORAGE_KEY);
-      }
-    }
+    window.localStorage.setItem(EMAIL_KEY, email);
   } catch {
-    // localStorage unavailable
+    // localStorage unavailable — the alerts themselves live on the server
   }
 }
 
-function parseAlerts(raw: string): StoredAlert[] {
+function recallEmail(): string {
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as StoredAlert[]) : [];
+    return window.localStorage.getItem(EMAIL_KEY) ?? "";
   } catch {
-    return [];
+    return "";
   }
 }
 
-function subscribe(onStoreChange: () => void) {
-  const handler = () => onStoreChange();
-  window.addEventListener(EVENT_NAME, handler);
-  window.addEventListener("storage", handler);
-  return () => {
-    window.removeEventListener(EVENT_NAME, handler);
-    window.removeEventListener("storage", handler);
+function readTokens(): Record<string, string> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(TOKENS_KEY) ?? "{}");
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberToken(email: string, token: string) {
+  try {
+    window.localStorage.setItem(
+      TOKENS_KEY,
+      JSON.stringify({ ...readTokens(), [email]: token }),
+    );
+  } catch {
+    // Storage unavailable: the next call will 403 and the UI will say so.
+  }
+}
+
+function alertHeaders(email: string): Record<string, string> {
+  const token = readTokens()[email];
+  return token ? { "x-alert-token": token } : {};
+}
+
+/**
+ * The remembered email, read through the store hook so the server render and
+ * the first client render agree (both see "") and the stored value arrives on
+ * the update pass — no effect writes state synchronously, and no hydration
+ * mismatch.
+ */
+function subscribeEmail(onStoreChange: () => void) {
+  window.addEventListener("storage", onStoreChange);
+  return () => window.removeEventListener("storage", onStoreChange);
+}
+
+function useRememberedEmail(): string {
+  return useSyncExternalStore(
+    subscribeEmail,
+    recallEmail,
+    () => "",
+  );
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function formatDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-PH", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/**
+ * Editable email state that falls back to the remembered address: the input
+ * shows the stored value until the visitor types something, then follows
+ * their text without ever needing to push the store value into state.
+ */
+function useEmailField() {
+  const remembered = useRememberedEmail();
+  const [typed, setTyped] = useState<string | null>(null);
+  return {
+    email: typed ?? remembered,
+    setEmail: setTyped,
   };
-}
-
-function getAlertsSnapshot(): string {
-  return window.localStorage.getItem(STORAGE_KEY) ?? "[]";
-}
-
-function getServerAlertsSnapshot(): string {
-  return "[]";
-}
-
-function getHydratedSnapshot(): boolean {
-  return true;
-}
-
-function getServerHydratedSnapshot(): boolean {
-  return false;
-}
-
-function noopSubscribe() {
-  return () => {};
-}
-
-function readAlerts(): StoredAlert[] {
-  return parseAlerts(getAlertsSnapshot());
-}
-
-function writeAlerts(alerts: StoredAlert[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(alerts));
-  window.dispatchEvent(new Event(EVENT_NAME));
-}
-
-export function usePriceAlerts() {
-  const raw = useSyncExternalStore(
-    subscribe,
-    getAlertsSnapshot,
-    getServerAlertsSnapshot,
-  );
-  const alerts = useMemo(() => parseAlerts(raw), [raw]);
-  const hydrated = useSyncExternalStore(
-    noopSubscribe,
-    getHydratedSnapshot,
-    getServerHydratedSnapshot,
-  );
-
-  const addAlert = useCallback((input: Omit<StoredAlert, "id" | "createdAt">) => {
-    const next: StoredAlert = {
-      ...input,
-      id: `${input.productSlug}-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-    };
-    const current = readAlerts();
-    writeAlerts([
-      next,
-      ...current.filter((alert) => alert.productSlug !== input.productSlug),
-    ]);
-  }, []);
-
-  const removeAlert = useCallback((id: string) => {
-    writeAlerts(readAlerts().filter((alert) => alert.id !== id));
-  }, []);
-
-  return { alerts, hydrated, addAlert, removeAlert };
 }
 
 export function PriceAlertForm({
@@ -125,22 +130,115 @@ export function PriceAlertForm({
   productName: string;
   suggestedPrice: number;
 }) {
-  const { alerts, hydrated, addAlert, removeAlert } = usePriceAlerts();
+  const { email, setEmail } = useEmailField();
   const [target, setTarget] = useState(String(Math.round(suggestedPrice * 0.9)));
-  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Carries the email it was fetched under: switching accounts hides a watch
+  // that belongs to someone else without needing a synchronous reset.
+  const [saved, setSaved] = useState<{ email: string; alert: PriceAlertView } | null>(null);
 
-  const existing = useMemo(
-    () => alerts.find((alert) => alert.productSlug === productSlug),
-    [alerts, productSlug],
-  );
+  const normalized = email.trim().toLowerCase();
+  const visible = saved && saved.email === normalized ? saved.alert : null;
   const targetNumber = Number(target.replace(/[^0-9]/g, ""));
 
-  function handleSubmit(event: React.FormEvent) {
+  // A returning visitor with a remembered email sees the watch they already
+  // have for this product instead of silently overwriting it on submit. The
+  // write lands in a callback, so it never races the render.
+  useEffect(() => {
+    if (!looksLikeEmail(normalized)) return;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const response = await fetch(
+          `/api/alerts?email=${encodeURIComponent(normalized)}`,
+          { signal: controller.signal, headers: alertHeaders(normalized) },
+        );
+        if (!response.ok) return;
+        const data = (await readJson(response)) as { alerts?: PriceAlertView[] } | null;
+        const existing = data?.alerts?.find((alert) => alert.slug === productSlug);
+        // Only ever upgrades the view: a stale empty response must not clear
+        // a watch this page just saved.
+        if (existing && !controller.signal.aborted) {
+          setSaved({ email: normalized, alert: existing });
+        }
+      } catch {
+        /* aborted or offline — the form still works */
+      }
+    })();
+    return () => controller.abort();
+  }, [normalized, productSlug]);
+
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!targetNumber || targetNumber <= 0) return;
-    addAlert({ productSlug, productName, targetPrice: targetNumber });
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2200);
+    if (saving) return;
+    if (!looksLikeEmail(email)) {
+      setError("Enter the email your alerts should be filed under.");
+      return;
+    }
+    if (!targetNumber) {
+      setError("Enter a target price.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/alerts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...alertHeaders(email.trim().toLowerCase()),
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          slug: productSlug,
+          targetPrice: targetNumber,
+        }),
+      });
+      if (!response.ok) {
+        await readJson(response);
+        setError(
+          response.status === 400
+            ? "Check the email address and target price."
+            : response.status === 403
+              ? "That email's alerts are locked to the device that created them."
+              : response.status === 404
+                ? "That product isn't in the catalog."
+                : response.status === 429
+                  ? "Too many attempts — wait a moment and try again."
+                  : "Couldn't save the alert. Try again.",
+        );
+        return;
+      }
+      const data = (await readJson(response)) as {
+        alert?: PriceAlertView;
+        accessToken?: string;
+      } | null;
+      if (data?.alert) {
+        const normalizedEmail = email.trim().toLowerCase();
+        setSaved({ email: normalizedEmail, alert: data.alert });
+        rememberEmail(normalizedEmail);
+        if (data.accessToken) rememberToken(normalizedEmail, data.accessToken);
+      }
+    } catch {
+      setError("Couldn't reach the server. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (!visible || !saved) return;
+    try {
+      const response = await fetch(
+        `/api/alerts?email=${encodeURIComponent(saved.email)}&id=${visible.id}`,
+        { method: "DELETE", headers: alertHeaders(saved.email) },
+      );
+      if (response.ok) setSaved(null);
+    } catch {
+      setError("Couldn't remove the alert. Try again.");
+    }
   }
 
   return (
@@ -157,12 +255,31 @@ export function PriceAlertForm({
             Price alerts
           </h2>
           <p className="text-[14px] text-ink-2">
-            Saved on this device only. No account or email is sent in this demo.
+            Filed with your email so it follows you to any device. We flag it on
+            the alerts page when the price reaches your target — no email is
+            sent yet.
           </p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        <label
+          htmlFor={`alert-email-${productSlug}`}
+          className="block text-[14px] font-semibold text-ink"
+        >
+          Email
+        </label>
+        <input
+          id={`alert-email-${productSlug}`}
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="you@example.com"
+          className="h-12 w-full rounded-full border border-line bg-cream/60 px-4 text-[16px] text-ink outline-none focus:border-ink focus:ring-4 focus:ring-accent/30"
+          aria-describedby={`alert-hint-${productSlug}`}
+        />
+
         <label
           htmlFor={`alert-price-${productSlug}`}
           className="block text-[14px] font-semibold text-ink"
@@ -170,7 +287,7 @@ export function PriceAlertForm({
           Alert me when this reaches
         </label>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="flex flex-1 items-center rounded-full border border-line bg-cream/60 px-4 focus-within:border-ink focus-within:ring-4 focus-within:ring-accent/30">
+          <div className="flex flex-1 items-center rounded-full border border-line bg-cream/60 px-4 focus-within:border-ink focus-within:ring-4 focus:ring-accent/30">
             <span className="text-ink-3" aria-hidden="true">
               ₱
             </span>
@@ -183,16 +300,20 @@ export function PriceAlertForm({
                 setTarget(event.target.value.replace(/[^0-9,]/g, ""))
               }
               className="h-12 w-full bg-transparent px-2 text-[16px] font-semibold text-ink outline-none"
-              aria-describedby={`alert-hint-${productSlug}`}
             />
           </div>
-          <button type="submit" className="btn-primary h-12 w-full sm:w-auto">
-            {saved ? (
-              <>
-                <Check className="h-4 w-4" aria-hidden="true" /> Saved
-              </>
+          <button
+            type="submit"
+            disabled={saving}
+            className="btn-primary h-12 w-full disabled:opacity-60 sm:w-auto"
+          >
+            {saving ? (
+              "Saving…"
             ) : (
-              "Set price alert"
+              <>
+                {visible && <Check className="h-4 w-4" aria-hidden="true" />}
+                {visible ? "Update alert" : "Set price alert"}
+              </>
             )}
           </button>
         </div>
@@ -201,17 +322,28 @@ export function PriceAlertForm({
         </p>
       </form>
 
-      {hydrated && existing && (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-success-soft px-4 py-3">
+      {error && (
+        <p role="alert" className="mt-3 text-[14px] font-medium text-[#B54708]">
+          {error}
+        </p>
+      )}
+
+      {visible && (
+        <div className="mt-4 rounded-xl border border-line bg-success-soft px-4 py-3">
           <p className="text-[14px] text-ink">
-            Watching for <strong>{formatPeso(existing.targetPrice)}</strong> on{" "}
-            {existing.productName}.
+            Watching for <strong>{formatPeso(fromCents(visible.targetPriceCents))}</strong>{" "}
+            on {visible.productName ?? productName}.
+          </p>
+          <p className="mt-1 text-[13px] text-ink-2">
+            {visible.status === "triggered" && visible.triggeredAt
+              ? `Reached on ${formatDate(visible.triggeredAt)} — flagged on your alerts page.`
+              : "We'll flag it on your alerts page when the price reaches it. No email is sent."}
           </p>
           <button
             type="button"
-            onClick={() => removeAlert(existing.id)}
-            className="inline-flex items-center gap-1 text-[13px] font-semibold text-ink-2 hover:text-ink"
-            aria-label={`Remove price alert for ${existing.productName}`}
+            onClick={handleRemove}
+            className="mt-2 inline-flex items-center gap-1 text-[13px] font-semibold text-ink-2 hover:text-ink"
+            aria-label={`Remove price alert for ${visible.productName ?? productName}`}
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
             Remove
@@ -222,57 +354,198 @@ export function PriceAlertForm({
   );
 }
 
+type LookupPhase = "idle" | "loading" | "ready" | "error";
+
 export function PriceAlertList() {
-  const { alerts, hydrated, removeAlert } = usePriceAlerts();
+  const { email, setEmail } = useEmailField();
+  const [lookupKey, setLookupKey] = useState("");
+  const [phase, setPhase] = useState<LookupPhase>("idle");
+  const [alerts, setAlerts] = useState<PriceAlertView[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!hydrated) {
-    return (
-      <div className="space-y-3" aria-busy="true">
-        <div className="skeleton h-20 w-full" />
-        <div className="skeleton h-20 w-full" />
-      </div>
-    );
-  }
+  const lookup = useCallback(async (value: string) => {
+    const normalized = value.trim().toLowerCase();
+    if (!looksLikeEmail(normalized)) {
+      setPhase("error");
+      setError("Enter the email your alerts are filed under.");
+      return;
+    }
+    setPhase("loading");
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/alerts?email=${encodeURIComponent(normalized)}`,
+        { headers: alertHeaders(normalized) },
+      );
+      if (!response.ok) {
+        setPhase("error");
+        setError(
+          response.status === 400
+            ? "That doesn't look like a valid email address."
+            : response.status === 403
+              ? "These alerts are locked to the device that created them."
+              : "Couldn't load alerts. Try again.",
+        );
+        return;
+      }
+      const data = (await readJson(response)) as { alerts?: PriceAlertView[] } | null;
+      setAlerts(data?.alerts ?? []);
+      setLookupKey(normalized);
+      rememberEmail(normalized);
+      setPhase("ready");
+    } catch {
+      setPhase("error");
+      setError("Couldn't reach the server. Try again.");
+    }
+  }, []);
 
-  if (alerts.length === 0) {
-    return (
-      <div className="card p-8 text-center">
-        <p className="text-[17px] font-bold text-ink">No price alerts yet.</p>
-        <p className="mt-1 text-[15px] text-ink-2">
-          Open any product and set a target price to watch it from this device.
-        </p>
-      </div>
-    );
+  const remembered = useRememberedEmail();
+
+  // A returning visitor's alerts are simply there on arrival: auto-load the
+  // remembered address once, until something has been looked up deliberately.
+  // Scheduled rather than called inline so the effect body itself writes no
+  // state — the load is work the effect schedules, not a render it forces.
+  useEffect(() => {
+    if (!remembered || lookupKey) return;
+    const timer = window.setTimeout(() => void lookup(remembered), 0);
+    return () => window.clearTimeout(timer);
+  }, [remembered, lookupKey, lookup]);
+
+  async function remove(alert: PriceAlertView) {
+    try {
+      const response = await fetch(
+        `/api/alerts?email=${encodeURIComponent(lookupKey)}&id=${alert.id}`,
+        { method: "DELETE", headers: alertHeaders(lookupKey) },
+      );
+      if (response.ok) {
+        setAlerts((previous) => previous.filter((item) => item.id !== alert.id));
+      }
+    } catch {
+      setError("Couldn't remove the alert. Try again.");
+    }
   }
 
   return (
-    <ul className="flex flex-col gap-3">
-      {alerts.map((alert) => (
-        <li
-          key={alert.id}
-          className="card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+    <div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void lookup(email);
+        }}
+        className="card mb-5 flex flex-col gap-3 p-4 sm:flex-row sm:items-center"
+      >
+        <label htmlFor="alerts-email" className="sr-only">
+          Email for your alerts
+        </label>
+        <input
+          id="alerts-email"
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="you@example.com"
+          className="h-12 w-full rounded-full border border-line bg-cream/60 px-4 text-[16px] text-ink outline-none focus:border-ink focus:ring-4 focus:ring-accent/30"
+        />
+        <button
+          type="submit"
+          disabled={phase === "loading"}
+          className="btn-primary h-12 shrink-0 disabled:opacity-60"
         >
-          <div className="min-w-0">
-            <p className="break-words text-[16px] font-semibold text-ink">{alert.productName}</p>
-            <p className="text-[14px] text-ink-2">
-              Target: <strong>{formatPeso(alert.targetPrice)}</strong>
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <a href={`/product/${alert.productSlug}`} className="btn-ghost text-[14px]">
-              View product
-            </a>
-            <button
-              type="button"
-              onClick={() => removeAlert(alert.id)}
-              className="btn-ghost text-[14px] text-ink-2"
-              aria-label={`Remove alert for ${alert.productName}`}
-            >
-              Remove
-            </button>
-          </div>
-        </li>
-      ))}
-    </ul>
+          {phase === "loading" ? "Loading…" : "Find my alerts"}
+        </button>
+      </form>
+
+      {error && (
+        <p role="alert" className="mb-4 text-[14px] font-medium text-[#B54708]">
+          {error}
+        </p>
+      )}
+
+      {phase === "loading" && (
+        <div className="space-y-3" aria-busy="true">
+          <div className="skeleton h-20 w-full" />
+          <div className="skeleton h-20 w-full" />
+        </div>
+      )}
+
+      {phase === "idle" && (
+        <div className="card p-8 text-center">
+          <p className="text-[17px] font-bold text-ink">See your price alerts.</p>
+          <p className="mt-1 text-[15px] text-ink-2">
+            Enter the email you used on a product page to load what you&apos;re
+            watching.
+          </p>
+        </div>
+      )}
+
+      {phase === "ready" && alerts.length === 0 && (
+        <div className="card p-8 text-center">
+          <p className="text-[17px] font-bold text-ink">No price alerts for this email.</p>
+          <p className="mt-1 text-[15px] text-ink-2">
+            Open any product and set a target price — it will show up here.
+          </p>
+        </div>
+      )}
+
+      {phase === "ready" && alerts.length > 0 && (
+        <ul className="flex flex-col gap-3">
+          {alerts.map((alert) => {
+            const target = formatPeso(fromCents(alert.targetPriceCents));
+            const reached = alert.status === "triggered";
+            return (
+              <li
+                key={alert.id}
+                className="card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="break-words text-[16px] font-semibold text-ink">
+                      {alert.productName ?? alert.slug}
+                    </p>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                        reached
+                          ? "bg-success-soft text-success"
+                          : "bg-accent-soft text-ink"
+                      }`}
+                    >
+                      {reached ? "Reached" : "Watching"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[14px] text-ink-2">
+                    Target: <strong>{target}</strong>
+                    {alert.currentPriceCents !== null && (
+                      <>
+                        {" · now "}
+                        <strong>{formatPeso(fromCents(alert.currentPriceCents))}</strong>
+                      </>
+                    )}
+                  </p>
+                  {reached && alert.triggeredAt && (
+                    <p className="text-[13px] font-medium text-success">
+                      Reached on {formatDate(alert.triggeredAt)} — flagged here, no
+                      email sent.
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <a href={`/product/${alert.slug}`} className="btn-ghost text-[14px]">
+                    View product
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => void remove(alert)}
+                    className="btn-ghost text-[14px] text-ink-2"
+                    aria-label={`Remove alert for ${alert.productName ?? alert.slug}`}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }

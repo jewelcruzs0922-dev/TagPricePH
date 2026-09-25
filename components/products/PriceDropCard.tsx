@@ -1,14 +1,21 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { Product } from "@/lib/types";
-import { getLowestOffer, getPriceDropPercent } from "@/lib/pricing";
+import { getLowestOffer, getPriceDropPercent, type RecordedDrop } from "@/lib/pricing";
 import { getStore } from "@/lib/data/stores";
 import { formatPeso } from "@/lib/utils/format";
 import { StoreLogo } from "@/components/ui/StoreLogo";
 import { ChevronRight } from "lucide-react";
 
-export function PriceDropCard({ product }: { product: Product }) {
+type PriceDropCardProps = {
+  product: Product;
+  /** Set when the drop comes from recorded observations rather than the sample reference price. */
+  recorded?: RecordedDrop;
+};
+
+export function PriceDropCard({ product, recorded }: PriceDropCardProps) {
   const lowest = getLowestOffer(product.offers);
-  const drop = getPriceDropPercent(product) ?? 0;
+  const drop = recorded?.percent ?? getPriceDropPercent(product) ?? 0;
   const storeId = lowest?.storeId ?? product.offers[0]?.storeId ?? "shopee";
 
   return (
@@ -17,12 +24,12 @@ export function PriceDropCard({ product }: { product: Product }) {
         <span className="absolute left-3 top-3 z-10 rounded-lg bg-accent px-2.5 py-1 text-[12px] font-bold text-ink">
           -{drop}%
         </span>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={product.image}
           alt={product.name}
-          loading="lazy"
-          className="h-full w-full object-cover transition group-hover:scale-[1.03]"
+          fill
+          sizes="(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+          className="object-cover transition group-hover:scale-[1.03]"
         />
       </div>
 
@@ -36,12 +43,18 @@ export function PriceDropCard({ product }: { product: Product }) {
           <p className="text-[22px] font-extrabold tracking-tight text-ink">
             {lowest ? formatPeso(lowest.price) : "—"}
           </p>
-          {product.previousPrice && (
+          {!recorded && product.previousPrice && (
             <p className="text-[14px] text-ink-3 line-through">
               {formatPeso(product.previousPrice)}
             </p>
           )}
         </div>
+        {recorded ? (
+          <p className="text-[13px] font-semibold leading-snug text-success">
+            {recorded.detail}
+            {recorded.averageDetail ? ` · ${recorded.averageDetail}` : ""}
+          </p>
+        ) : null}
         <div className="mt-auto flex items-center justify-between gap-2 pt-1">
           <span className="flex min-w-0 items-center gap-2 text-[14px] font-medium text-ink-2">
             <StoreLogo storeId={storeId} size={26} />

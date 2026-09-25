@@ -26,6 +26,7 @@ export function SearchResults({
   initialResults,
   initialNote,
   initialTimings,
+  initialTotal,
   brands,
 }: {
   initialQuery: string;
@@ -38,6 +39,12 @@ export function SearchResults({
    * these cards say the same thing the product page would.
    */
   initialTimings?: Record<string, BuyTiming>;
+  /**
+   * Size of the full result set. The client only ever holds a window of it —
+   * `initialResults` for the first paint and one more window per "Show more" —
+   * so the catalog itself never has to fit in the page.
+   */
+  initialTotal: number;
   /** Facet options for the brand filter, computed server-side. */
   brands: string[];
 }) {
@@ -47,14 +54,17 @@ export function SearchResults({
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [results, setResults] = useState<Product[]>(initialResults);
+  const [total, setTotal] = useState(initialTotal);
   const [note, setNote] = useState<string | null>(initialNote);
   const [timings, setTimings] = useState<Record<string, BuyTiming>>(
     initialTimings ?? {},
   );
   const [phase, setPhase] = useState<Phase>("idle");
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const requestId = useRef(0);
   const skipFirstFetch = useRef(true);
+  const pageRef = useRef(1);
 
   // Filters and sort are applied on the server. Each change issues one debounced
   // request; a stale response can never overwrite a newer one.
@@ -78,13 +88,17 @@ export function SearchResults({
             results: Product[];
             note: string | null;
             timings?: Record<string, BuyTiming>;
+            total?: number;
           };
         })
         .then((data) => {
           if (id !== requestId.current) return;
           setResults(data.results);
+          setTotal(data.total ?? data.results.length);
           setNote(data.note);
           setTimings(data.timings ?? {});
+          pageRef.current = 1;
+          setLoadingMore(false);
           setPhase("idle");
         })
         .catch(() => {
@@ -101,6 +115,43 @@ export function SearchResults({
 
   function update<K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) {
     setFilters((prev) => ({ ...prev, [key]: value }));
+  }
+
+  /**
+   * Fetch the next window and append it. Shares `requestId` with the filter
+   * effect so whichever request the user started last is the one that lands:
+   * a filter change supersedes a pending "Show more", never the reverse —
+   * and a load more is refused outright while a filter fetch is in flight, so
+   * an old page can never be appended to a new result set.
+   */
+  async function loadMore() {
+    if (phase !== "idle" || loadingMore) return;
+    const id = requestId.current + 1;
+    requestId.current = id;
+    setLoadingMore(true);
+    try {
+      const response = await fetch(
+        buildSearchUrl(query, filters, sort, pageRef.current + 1),
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = (await response.json()) as {
+        results: Product[];
+        note: string | null;
+        timings?: Record<string, BuyTiming>;
+        total?: number;
+        page?: number;
+      };
+      if (id !== requestId.current) return;
+      setResults((prev) => [...prev, ...data.results]);
+      setTimings((prev) => ({ ...prev, ...(data.timings ?? {}) }));
+      setTotal(data.total ?? 0);
+      setNote(data.note);
+      pageRef.current = data.page ?? pageRef.current + 1;
+    } catch {
+      // Keep what is on screen; the button stays available to retry.
+    } finally {
+      if (requestId.current === id) setLoadingMore(false);
+    }
   }
 
   return (
@@ -234,7 +285,7 @@ export function SearchResults({
       <div>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <p className="text-[15px] text-ink-2" aria-live="polite">
-            {results.length} {results.length === 1 ? "result" : "results"}
+            {total} {total === 1 ? "result" : "results"}
             {phase === "loading" && " · updating…"}
           </p>
           <div className="flex items-center gap-2">
@@ -283,6 +334,21 @@ export function SearchResults({
                   timing={timings[product.slug]}
                 />
             ))}
+          </div>
+        )}
+
+        {results.length > 0 && results.length < total && (
+          <div className="mt-6 flex justify-center">
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={loadingMore || phase !== "idle"}
+              className="btn-ghost px-6 disabled:opacity-60"
+            >
+              {loadingMore
+                ? "Loading…"
+                : `Show more (${total - results.length} more)`}
+            </button>
           </div>
         )}
       </div>

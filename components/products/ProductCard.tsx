@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { BuyTiming, Product } from "@/lib/types";
 import { getLowestOffer, getPriceDropPercent, evaluateBuyTiming } from "@/lib/pricing";
 import { getStore } from "@/lib/data/stores";
@@ -37,12 +38,12 @@ export function ProductCard({
             -{drop}%
           </span>
         )}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={product.image}
           alt=""
-          loading="lazy"
-          className="h-full w-full object-cover transition group-hover:scale-[1.02]"
+          fill
+          sizes="(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+          className="object-cover transition group-hover:scale-[1.02]"
         />
       </Link>
 

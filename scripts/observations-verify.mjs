@@ -81,6 +81,7 @@ async function record(client, rows) {
     rows.map((row) => row.availability ?? "in_stock"),
     rows.map((row) => row.source),
     rows.map((row) => row.observedAt),
+    rows.map((row) => row.providerId),
   ]);
 }
 
@@ -105,14 +106,14 @@ async function main() {
     console.log("\nWrite path");
     await record(client, [
       // Two stores, same day → one point at the lower price.
-      { productSlug: ALL_LIVE, storeId: "shopee", price: 45000, observedAt: day(2), source: "live" },
-      { productSlug: ALL_LIVE, storeId: "lazada", price: 44500, observedAt: day(2), source: "live" },
-      { productSlug: ALL_LIVE, storeId: "shopee", price: 44000, observedAt: day(1), source: "live" },
-      { productSlug: ALL_LIVE, storeId: "tiktok", price: 43800, observedAt: day(1), source: "live" },
-      { productSlug: ALL_LIVE, storeId: "shopee", price: 44200, observedAt: day(0), source: "live" },
+      { productSlug: ALL_LIVE, storeId: "shopee", price: 45000, observedAt: day(2), source: "live", providerId: "verify-script" },
+      { productSlug: ALL_LIVE, storeId: "lazada", price: 44500, observedAt: day(2), source: "live", providerId: "verify-script" },
+      { productSlug: ALL_LIVE, storeId: "shopee", price: 44000, observedAt: day(1), source: "live", providerId: "verify-script" },
+      { productSlug: ALL_LIVE, storeId: "tiktok", price: 43800, observedAt: day(1), source: "live", providerId: "verify-script" },
+      { productSlug: ALL_LIVE, storeId: "shopee", price: 44200, observedAt: day(0), source: "live", providerId: "verify-script" },
       // One generated reading among real ones — must taint its day.
-      { productSlug: MIXED, storeId: "shopee", price: 500, observedAt: day(1), source: "live" },
-      { productSlug: MIXED, storeId: "lazada", price: 495, observedAt: day(1), source: "demo" },
+      { productSlug: MIXED, storeId: "shopee", price: 500, observedAt: day(1), source: "live", providerId: "verify-script" },
+      { productSlug: MIXED, storeId: "lazada", price: 495, observedAt: day(1), source: "demo", providerId: "verify-script" },
     ]);
 
     const { rows: written } = await client.query(
@@ -211,19 +212,19 @@ async function main() {
       client,
       "a zero price is rejected",
       INSERT_OBSERVATIONS_SQL,
-      [[ALL_LIVE], ["shopee"], [0], ["in_stock"], ["live"], [day(0)]],
+      [[ALL_LIVE], ["shopee"], [0], ["in_stock"], ["live"], [day(0)], ["verify-script"]],
     );
     await expectRejected(
       client,
       "an unknown source is rejected",
       INSERT_OBSERVATIONS_SQL,
-      [[ALL_LIVE], ["shopee"], [100], ["in_stock"], ["bogus"], [day(0)]],
+      [[ALL_LIVE], ["shopee"], [100], ["in_stock"], ["bogus"], [day(0)], ["verify-script"]],
     );
     await expectRejected(
       client,
       "an unknown availability is rejected",
       INSERT_OBSERVATIONS_SQL,
-      [[ALL_LIVE], ["shopee"], [100], ["maybe"], ["live"], [day(0)]],
+      [[ALL_LIVE], ["shopee"], [100], ["maybe"], ["live"], [day(0)], ["verify-script"]],
     );
 
     console.log("\nRead index");

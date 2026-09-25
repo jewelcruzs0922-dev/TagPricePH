@@ -38,6 +38,8 @@ export type ObservationInput = {
   observedAt: string;
   availability?: "in_stock" | "out_of_stock";
   source: DataSource;
+  /** Who reported this reading — provenance, required by migration 0003. */
+  providerId: string;
 };
 
 /**
@@ -62,6 +64,7 @@ export async function recordObservations(
     inputs.map((item) => item.availability ?? "in_stock"),
     inputs.map((item) => item.source),
     inputs.map((item) => item.observedAt),
+    inputs.map((item) => item.providerId),
   ]);
 }
 

@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { Search, X, ArrowRight, Link2 } from "lucide-react";
-import { getSuggestions, isProductUrl } from "@/lib/data/search";
+import { isProductUrl } from "@/lib/data/search-core";
+import type { Product } from "@/lib/types";
 import { formatPeso } from "@/lib/utils/format";
 import { getLowestOffer } from "@/lib/pricing";
 
@@ -13,6 +15,9 @@ type SearchBarProps = {
   size?: "lg" | "md";
   className?: string;
 };
+
+/** Long enough that a fast typist produces one request, not one per letter. */
+const SUGGESTION_DEBOUNCE_MS = 150;
 
 export function SearchBar({
   placeholder = "Search products or paste a link…",
@@ -26,10 +31,44 @@ export function SearchBar({
   const [activeIndex, setActiveIndex] = useState(-1);
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [fetchedSuggestions, setFetchedSuggestions] = useState<Product[]>([]);
 
   const pasted = isProductUrl(query);
-  const suggestions = pasted ? [] : getSuggestions(query);
+  // Pasted links never show product suggestions, and an empty box has nothing
+  // to suggest — both gated at render so the effect below never has to write
+  // state synchronously to agree with the UI.
+  const suggestions = pasted || !query.trim() ? [] : fetchedSuggestions;
   const showPanel = open && (pasted || suggestions.length > 0);
+
+  /**
+   * Suggestions are served by `/api/suggestions` rather than filtered here,
+   * so the sample catalog never enters the client bundle — the price of
+   * instant keystrokes used to be shipping all 150 products to every page.
+   * Debounced, abortable, and only the answer to the newest keystroke lands;
+   * a failure keeps the previous list instead of flashing the panel shut.
+   */
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (pasted || !trimmed) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetch(`/api/suggestions?q=${encodeURIComponent(trimmed)}`, {
+        signal: controller.signal,
+      })
+        .then((response) => (response.ok ? response.json() : []))
+        .then((data: unknown) => {
+          if (controller.signal.aborted) return;
+          setFetchedSuggestions(Array.isArray(data) ? (data as Product[]) : []);
+        })
+        .catch(() => {
+          /* aborted by a newer keystroke, or the request failed */
+        });
+    }, SUGGESTION_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, pasted]);
 
   useEffect(() => {
     function onClickOutside(event: MouseEvent) {
@@ -164,10 +203,11 @@ export function SearchBar({
                       router.push(`/product/${product.slug}`);
                     }}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <Image
                       src={product.image}
                       alt=""
+                      width={40}
+                      height={40}
                       className="h-10 w-10 rounded-lg border border-line bg-cream object-cover"
                     />
                     <span className="min-w-0 flex-1">

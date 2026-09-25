@@ -13,11 +13,29 @@ import type { DataSource, Product } from "@/lib/types";
  */
 export type ProviderId = "demo" | (string & {});
 
+/**
+ * Whether a provider can answer at all right now.
+ *
+ * An adapter for a marketplace we are not yet authorized to read ships as
+ * "unavailable" with a reason: it exists, it is registered, and it refuses
+ * loudly — never an empty catalog, which would read as "this marketplace has
+ * no products", a claim nobody here can make.
+ *
+ * The error, the guard, and the adapters themselves live in
+ * `lib/api/marketplace-adapters.ts`, which is kept free of value imports so
+ * scripts/providers-verify.mjs can import it from plain Node.
+ */
+export type ProviderStatus = "ready" | "unavailable";
+
 export interface MarketplaceProvider {
   /** Stable identifier — also its registry key. */
   readonly id: ProviderId;
   /** Whether readings from this provider are real. Drives the honesty labels. */
   readonly source: DataSource;
+  /** Whether it can answer today. Required so nothing is silent about this. */
+  readonly status: ProviderStatus;
+  /** Required by "unavailable" providers; why we cannot read them yet. */
+  readonly unavailableReason?: string;
 
   /** Every product known to the provider (static params, catalog enumeration). */
   listProducts(): Promise<Product[]>;

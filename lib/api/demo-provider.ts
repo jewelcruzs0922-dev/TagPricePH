@@ -14,6 +14,7 @@ import { searchProducts } from "@/lib/data/search";
 export const demoProvider: MarketplaceProvider = {
   id: "demo",
   source: "demo",
+  status: "ready",
 
   async listProducts(): Promise<Product[]> {
     return products;

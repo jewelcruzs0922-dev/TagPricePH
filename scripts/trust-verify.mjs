@@ -139,6 +139,25 @@ check(
   `${categories.length} category page(s) found`,
 );
 
+console.log("\nRanking conditions");
+check(
+  "every product page names its ranking basis as the lowest listed price",
+  pages.every((page) => page.html.includes("Lowest listed price")),
+  pages.find((page) => !page.html.includes("Lowest listed price"))?.file ?? "",
+);
+check(
+  "every product page states that shipping and fees are not included",
+  pages.every((page) => page.html.includes("Shipping and fees are not included")),
+  pages
+    .find((page) => !page.html.includes("Shipping and fees are not included"))
+    ?.file ?? "",
+);
+check(
+  "no product page claims an unqualified Best price",
+  pages.every((page) => !page.html.includes("Best price")),
+  pages.find((page) => page.html.includes("Best price"))?.file ?? "",
+);
+
 console.log("\nUnsupported claims");
 check(
   "homepage shows no review count",

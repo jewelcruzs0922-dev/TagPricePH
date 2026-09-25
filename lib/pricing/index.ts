@@ -1,5 +1,6 @@
 import type { PricePoint, Product, StoreOffer, BuyTiming } from "@/lib/types";
-import { getPriceSeries } from "@/lib/data/observations";
+import { getDataSource, getPriceSeries, type PriceSeries } from "@/lib/data/observations";
+import { formatPeso } from "@/lib/utils/format";
 
 export type HistoryRange = "7D" | "30D" | "3M" | "6M";
 
@@ -173,9 +174,76 @@ export function evaluateBuyTiming(product: Product, history?: PricePoint[]): Buy
   };
 }
 
+/**
+ * The catalog's reference-price drop — the sample's "was ₱X, now ₱Y".
+ *
+ * This is a demo figure and callers must present it as one. It refuses to
+ * answer for live-sourced products: beside real prices a catalog
+ * `previousPrice` is a number nobody observed, so once a provider reports
+ * live offers the drop has to come from `getRecordedPriceDrop` instead.
+ */
 export function getPriceDropPercent(product: Product): number | null {
   if (!product.previousPrice) return null;
+  if (getDataSource(product) === "live") return null;
   const lowest = getLowestOffer(product.offers);
   if (!lowest) return null;
   return Math.round(((product.previousPrice - lowest.price) / product.previousPrice) * 100);
+}
+
+export type RecordedDrop = {
+  /** How far the current price sits below the previous recorded reading, in pesos. */
+  amount: number;
+  /** Percentage below that reading. */
+  percent: number;
+  /** "Down ₱2,000 vs previous recorded price" */
+  detail: string;
+  /** "Down 8% from 30-day average" — null unless enough readings exist to claim it. */
+  averageDetail: string | null;
+};
+
+/**
+ * A price drop derived from recorded observations — never from a listed
+ * "previous" price.
+ *
+ * Returns null in every case where the data cannot support the claim:
+ *  - the series is not entirely live (one generated reading would make the
+ *    comparison meaningless),
+ *  - fewer than two readings (a drop needs something to have fallen from),
+ *  - the current price is not below the last recorded one (nothing fell).
+ *
+ * When the newest reading *is* the current price, the comparison steps back
+ * one reading so the sentence compares like with like.
+ */
+export function getRecordedPriceDrop(
+  series: PriceSeries,
+  currentPrice: number,
+): RecordedDrop | null {
+  if (series.source !== "live") return null;
+  if (currentPrice <= 0) return null;
+
+  const points = series.points;
+  if (points.length < 2) return null;
+
+  const newest = points[points.length - 1];
+  const previous = points[points.length - 2];
+  if (!newest || !previous) return null;
+
+  const baseline = newest.price === currentPrice ? previous.price : newest.price;
+  if (baseline <= currentPrice) return null;
+
+  const amount = baseline - currentPrice;
+  const percent = Math.round((amount / baseline) * 100);
+
+  const stats = getWindowStats(points, currentPrice, "30D");
+  const averageDetail =
+    stats.points.length >= MIN_TIMING_OBSERVATIONS && stats.percentVsAverage <= -1
+      ? `Down ${Math.abs(stats.percentVsAverage)}% from ${describeWindow(stats.points)} average`
+      : null;
+
+  return {
+    amount,
+    percent,
+    detail: `Down ${formatPeso(amount)} vs previous recorded price`,
+    averageDetail,
+  };
 }

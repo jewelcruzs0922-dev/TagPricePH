@@ -33,6 +33,8 @@ export type IngestRow = {
   observedAt: string;
   availability: "in_stock" | "out_of_stock";
   source: DataSource;
+  /** Who reported it — provenance, carried through to price_observations. */
+  providerId: string;
 };
 
 export type IngestPlan =
@@ -49,20 +51,41 @@ export type IngestProvider = {
   readonly source: DataSource;
 };
 
+/**
+ * Why this provider may not write, or null when it may.
+ *
+ * Kept separate from `planIngestion` so an ingestion run can refuse the whole
+ * job up front — one message for the run instead of one per product — while
+ * still using exactly the same words.
+ */
+export function providerRefusal(provider: IngestProvider): string | null {
+  // The database is the storage side of ingestion, never a source: selecting
+  // DATA_PROVIDER=db would otherwise read its own rows back and re-record
+  // them as fresh observations on every run. Refused by id, ahead of the
+  // source check, with words that describe what it actually is.
+  if (provider.id === "db") {
+    return (
+      `Provider "${provider.id}" is the database read model — it serves what ` +
+      `other providers wrote and is never a source of new readings. ` +
+      `Refused — nothing was written.`
+    );
+  }
+  if (provider.source === "live") return null;
+  return (
+    `Provider "${provider.id}" is not authorized to report real prices ` +
+    `(source: "${provider.source}"). Its readings are generated, so ` +
+    `recording them would create a price history that never happened. ` +
+    `Refused — nothing was written.`
+  );
+}
+
 export function planIngestion(
   provider: IngestProvider,
   product: Product,
 ): IngestPlan {
-  if (provider.source !== "live") {
-    return {
-      authorized: false,
-      providerId: provider.id,
-      reason:
-        `Provider "${provider.id}" is not authorized to report real prices ` +
-        `(source: "${provider.source}"). Its readings are generated, so ` +
-        `recording them would create a price history that never happened. ` +
-        `Refused — nothing was written.`,
-    };
+  const refusal = providerRefusal(provider);
+  if (refusal) {
+    return { authorized: false, providerId: provider.id, reason: refusal };
   }
 
   const rows: IngestRow[] = product.offers.map((offer) => ({
@@ -72,6 +95,7 @@ export function planIngestion(
     observedAt: offer.updatedAt,
     availability: offer.inStock ? "in_stock" : "out_of_stock",
     source: offer.source,
+    providerId: provider.id,
   }));
 
   const unreadable = rows.find((row) => Number.isNaN(Date.parse(row.observedAt)));
@@ -92,4 +116,89 @@ export function planIngestion(
     providerSource: provider.source,
     rows,
   };
+}
+
+/**
+ * Phase 18's row-level screening: the impossible readings are refused before
+ * anything is written, while aggressive-but-real sales pass.
+ *
+ * The 85% threshold is chosen to catch the errors that actually happen —
+ * dropped zeros, decimal slips, unconverted currencies (all ≈10× moves) —
+ * without ever blocking a legitimate deep discount. A row that fails is
+ * reported with its reason instead of silently vanishing: the batch records
+ * what was accepted, and the caller learns exactly what was refused and why.
+ *
+ * Pure by design (like planIngestion): the caller supplies the last recorded
+ * price per product+store, so this module never touches the database and the
+ * verification script exercises exactly the code the route runs.
+ */
+export const MAX_PLAUSIBLE_CHANGE = 0.85;
+
+export type RejectedIngestRow = {
+  productSlug: string;
+  storeId: string;
+  price: number;
+  observedAt: string;
+  reason: string;
+};
+
+export function rowKey(productSlug: string, storeId: string): string {
+  return `${productSlug}::${storeId}`;
+}
+
+export function screenRows(
+  rows: IngestRow[],
+  previousPrices: ReadonlyMap<string, number>,
+  now: number = Date.now(),
+): { accepted: IngestRow[]; rejected: RejectedIngestRow[] } {
+  const accepted: IngestRow[] = [];
+  const rejected: RejectedIngestRow[] = [];
+  const seenInBatch = new Set<string>();
+
+  for (const row of rows) {
+    const reject = (reason: string) =>
+      rejected.push({
+        productSlug: row.productSlug,
+        storeId: row.storeId,
+        price: row.price,
+        observedAt: row.observedAt,
+        reason,
+      });
+
+    if (!Number.isFinite(row.price) || row.price <= 0) {
+      reject(`price ${row.price} is not a positive amount`);
+      continue;
+    }
+
+    if (Date.parse(row.observedAt) > now + 60 * 60 * 1000) {
+      reject(`observation time ${row.observedAt} is in the future`);
+      continue;
+    }
+
+    const occurrence = `${rowKey(row.productSlug, row.storeId)}::${row.observedAt}`;
+    if (seenInBatch.has(occurrence)) {
+      reject(`duplicate of an earlier row for this offer at ${row.observedAt}`);
+      continue;
+    }
+    seenInBatch.add(occurrence);
+
+    const previous = previousPrices.get(rowKey(row.productSlug, row.storeId));
+    if (previous !== undefined && previous > 0) {
+      const change = Math.abs(row.price - previous) / previous;
+      if (change > MAX_PLAUSIBLE_CHANGE) {
+        const direction = row.price > previous ? "up" : "down";
+        const percent = Math.round(change * 100);
+        reject(
+          `price moved ${direction} ${percent}% from the last recorded ` +
+            `observation (${previous} → ${row.price}) — beyond the ` +
+            `${Math.round(MAX_PLAUSIBLE_CHANGE * 100)}% plausibility limit`,
+        );
+        continue;
+      }
+    }
+
+    accepted.push(row);
+  }
+
+  return { accepted, rejected };
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseSearchParams } from "@/lib/data/search-url";
-import { runSearch } from "@/lib/search/run-search";
+import { parsePage, parseSearchParams } from "@/lib/data/search-url";
+import { toClientProducts } from "@/lib/data/search-core";
+import { runSearch, SEARCH_PAGE_SIZE } from "@/lib/search/run-search";
 import { resolveBuyTimings } from "@/lib/db/observations";
 
 export const dynamic = "force-dynamic";
@@ -22,10 +23,23 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const { q, filters, sort } = parseSearchParams(request.nextUrl.searchParams);
+    const page = parsePage(request.nextUrl.searchParams);
     const { results, note } = await runSearch({ q, filters, sort });
-    const timings = await resolveBuyTimings(results);
 
-    return NextResponse.json({ results, note, timings });
+    // One window per request: the total tells the client how much more there
+    // is, so nothing beyond it has to reach the browser until it is asked for.
+    const start = (page - 1) * SEARCH_PAGE_SIZE;
+    const window = results.slice(start, start + SEARCH_PAGE_SIZE);
+    const timings = await resolveBuyTimings(window);
+
+    return NextResponse.json({
+      results: toClientProducts(window),
+      note,
+      timings,
+      total: results.length,
+      page,
+      hasMore: start + window.length < results.length,
+    });
   } catch {
     // Deliberately carries no exception detail: this is a public endpoint.
     return NextResponse.json(

@@ -8,13 +8,18 @@
  * Nothing else in the suite touches rendered output: obs/ingest verify the SQL,
  * trust-verify checks the demo state. This one writes a temporary live batch
  * for a real catalog product, rebuilds, inspects the HTML, then removes the
- * rows and rebuilds again so the tree is left exactly as it was.
+ * rows and rebuilds again — and finally re-runs the idempotent seed, so both
+ * the tree and the database are left exactly as they were.
  *
  * Two directions are asserted:
  *   - the chart drops "Sample history…" and the verdict drops "Sample verdict"
  *     once a recorded series exists, and the recorded numbers reach the SVG;
  *   - the page-level sample label and the JSON-LD offer omission stay put,
  *     because those key off the *offers*, which are still sample data.
+ *
+ * Phase 13 is asserted the same way: /price-drops and the product page report
+ * a drop from recorded readings while the table holds them, and go back to
+ * labelling the feed as demonstration figures the moment it is emptied.
  *
  * Usage: node scripts/recorded-history-verify.mjs   (runs `npm run build` twice)
  */
@@ -82,7 +87,11 @@ function build(step) {
 }
 
 function productHtml() {
-  const file = path.join(root, ".next", "server", "app", "product", `${SLUG}.html`);
+  return appHtml("product", `${SLUG}.html`);
+}
+
+function appHtml(...segments) {
+  const file = path.join(root, ".next", "server", "app", ...segments);
   if (!existsSync(file)) throw new Error(`built page not found: ${file}`);
   return readFileSync(file, "utf8");
 }
@@ -102,7 +111,9 @@ async function main() {
   });
 
   let htmlDuringRecording;
+  let dropsHtmlDuringRecording;
   let restoredHtml;
+  let restoredDropsHtml;
 
   try {
     // Leftovers from an interrupted run would silently invalidate every check.
@@ -120,6 +131,7 @@ async function main() {
         availability: "in_stock",
         source: "live",
         observedAt: date.toISOString(),
+        providerId: "e2e-provider",
       };
     });
 
@@ -130,6 +142,7 @@ async function main() {
       rows.map((row) => row.availability),
       rows.map((row) => row.source),
       rows.map((row) => row.observedAt),
+      rows.map((row) => row.providerId),
     ]);
 
     const { rows: written } = await client.query(
@@ -172,6 +185,22 @@ async function main() {
       "the meta description still leads with the sample qualifier",
       htmlDuringRecording.includes('<meta name="description" content="Sample data.'),
     );
+
+    dropsHtmlDuringRecording = appHtml("price-drops.html");
+    check(
+      "the product page states a drop against the recorded price",
+      htmlDuringRecording.includes("vs previous recorded price"),
+      "expected the recorded-drop sentence on the product page",
+    );
+    check(
+      "/price-drops reports drops from the recorded feed",
+      dropsHtmlDuringRecording.includes("Updated from recorded prices"),
+      "expected the page to say it is reporting recorded prices",
+    );
+    check(
+      "/price-drops never falls back to a listed previous price once readings exist",
+      !dropsHtmlDuringRecording.includes("previous reference price"),
+    );
   } finally {
     console.log("\nRestoring");
     await client.query("DELETE FROM price_observations WHERE product_slug = $1", [SLUG]);
@@ -200,6 +229,35 @@ async function main() {
     check(
       "the sample verdict qualifier comes back",
       restoredHtml.includes("Sample verdict"),
+    );
+
+    restoredDropsHtml = appHtml("price-drops.html");
+    check(
+      "the product page stops claiming a recorded drop once the readings are gone",
+      !restoredHtml.includes("vs previous recorded price"),
+    );
+    check(
+      "/price-drops returns to its sample feed",
+      restoredDropsHtml.includes("Updated from demo catalog") &&
+        !restoredDropsHtml.includes("Updated from recorded prices"),
+    );
+    check(
+      "the sample feed still labels itself as demonstration figures",
+      restoredDropsHtml.includes("not live retailer feeds"),
+    );
+
+    // Every assertion above needed this product's table empty — but the demo
+    // series that was seeded before this script ran must not stay deleted
+    // (catalog:verify compares the seeded history row-for-row). The seed is
+    // idempotent, so re-running it restores exactly the pristine state.
+    const seeded = spawnSync(process.execPath, [path.join(root, "scripts", "seed.mjs")], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    check(
+      "the seeded demo series is restored before exiting",
+      seeded.status === 0,
+      (seeded.stderr || seeded.stdout || "").slice(-400),
     );
   }
 

@@ -17,8 +17,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# env files
+# env files (.env.example is the documented, valueless template)
 .env*
+!.env.example
 
 # typescript
 *.tsbuildinfo
