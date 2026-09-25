@@ -300,3 +300,181 @@ export function matchProduct(
     reason: `scored ${best.score.toFixed(2)} against "${best.product.name}"`,
   };
 }
+
+/* -------------------------------------------------------------------------- *
+ * Marketplace URL paste
+ *
+ * Pasting a Shopee/Lazada/TikTok link is the fastest way to name a product,
+ * but the three sites expose very different URLs:
+ *
+ *  - Lazada puts the product title in the path
+ *    (/products/iphone-16-128gb-1234567890.html) → we can read it.
+ *  - Shopee and TikTok only put a numeric listing id in the path → we cannot
+ *    resolve it at all without marketplace API access, and must say so.
+ *
+ * Guessing at the id-only case would be the exact fabrication Phase 1 banned,
+ * so the resolver returns an honest note for every branch.
+ * -------------------------------------------------------------------------- */
+
+export type Marketplace = "shopee" | "lazada" | "tiktok";
+
+export type ListingUrl = {
+  marketplace: Marketplace | null;
+  host: string;
+  /** Title text recoverable from the URL path, when the path carries one. */
+  slugTitle: string | null;
+  /** Numeric listing id, when the URL carries one. */
+  listingId: string | null;
+};
+
+export type UrlResolution = {
+  url: ListingUrl | null;
+  result: MatchResult;
+  /** Copy to show the user explaining how their link was interpreted. */
+  note: string;
+};
+
+const MARKETPLACE_NAMES: Record<Marketplace, string> = {
+  shopee: "Shopee",
+  lazada: "Lazada",
+  tiktok: "TikTok Shop",
+};
+
+/** Structural path segments that are never a product title. */
+const PATH_NOISE = new Set([
+  "products", "product", "items", "item", "shop", "store", "stores",
+  "p", "i", "s", "dp", "search", "category", "collections", "collection",
+]);
+
+/** Lazada/TikTok paths end with a long numeric id appended to the slug. */
+const TRAILING_ID = /[-_]\d{6,}$/;
+
+function readMarketplace(host: string): Marketplace | null {
+  const value = host.toLowerCase().replace(/^www\./, "");
+  if (value.includes("shopee")) return "shopee";
+  if (value.includes("lazada")) return "lazada";
+  if (value.includes("tiktok")) return "tiktok";
+  return null;
+}
+
+export function parseListingUrl(raw: string): ListingUrl | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+
+  const host = parsed.hostname;
+  const marketplace = readMarketplace(host);
+
+  const segments = parsed.pathname
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    });
+
+  // The title-bearing segment is the last one containing letters, walking
+  // backwards so a Lazada `/products/<slug>` never picks the collection name.
+  const slugSegment = [...segments]
+    .reverse()
+    .find((segment) => /[a-z]/i.test(segment) && !PATH_NOISE.has(segment.toLowerCase()));
+
+  let slugTitle: string | null = null;
+  if (slugSegment) {
+    const cleaned = slugSegment
+      .replace(/-i\.\d+(\.\d+)?$/, "") // Shopee "-i.1234567890.987654"
+      .replace(/\.[a-z]{2,5}$/i, "") // ".html" / ".php"
+      .replace(TRAILING_ID, "");
+    const words = cleaned.split(/[-_~]+/).filter(Boolean);
+    if (words.some((word) => /[a-z]/i.test(word))) {
+      // Join with spaces so "128-gb" and "128gb" tokenise identically.
+      slugTitle = words.join(" ");
+    }
+  }
+
+  let listingId: string | null = null;
+  for (const segment of segments) {
+    const id = /\d{6,}/.exec(segment);
+    if (id) {
+      listingId = id[0];
+      break;
+    }
+  }
+  if (!listingId) {
+    for (const value of parsed.searchParams.values()) {
+      const id = /^\d{6,}$/.exec(value.trim());
+      if (id) {
+        listingId = id[0];
+        break;
+      }
+    }
+  }
+
+  return { marketplace, host, slugTitle, listingId };
+}
+
+/**
+ * Resolves a pasted marketplace link against the catalog.
+ *
+ * Every branch returns a user-facing `note` — including the branches where
+ * nothing matched — so the UI never has to invent an explanation.
+ */
+export function resolveListingUrl(raw: string, candidates: Product[]): UrlResolution {
+  const url = parseListingUrl(raw);
+
+  if (!url) {
+    return {
+      url: null,
+      result: { status: "no_match", reason: "pasted value is not a readable URL" },
+      note: "That doesn't look like a link we can read. Paste a full Shopee, Lazada, or TikTok Shop product link, or search by the product's name.",
+    };
+  }
+
+  if (!url.marketplace) {
+    return {
+      url,
+      result: { status: "no_match", reason: `unsupported host "${url.host}"` },
+      note: `We can only read links from Shopee, Lazada, and TikTok Shop — “${url.host}” isn't one of them.`,
+    };
+  }
+
+  if (!url.slugTitle) {
+    const name = MARKETPLACE_NAMES[url.marketplace];
+    return {
+      url,
+      result: {
+        status: "no_match",
+        reason: `${name} link carries only a listing id (${url.listingId ?? "unknown"}), no readable title`,
+      },
+      note: "That link only carries a listing ID, which we can't look up without marketplace API access. Search by the product's name instead.",
+    };
+  }
+
+  const result = matchProduct({ title: url.slugTitle }, candidates);
+
+  if (result.status === "match") {
+    return { url, result, note: `Matched your pasted link to “${result.product.name}”.` };
+  }
+
+  if (result.status === "ambiguous") {
+    const names = result.candidates.map((product) => `“${product.name}”`).join(" or ");
+    return {
+      url,
+      result,
+      note: `Your link could be either ${names} — we couldn't tell which one you meant, so both are shown.`,
+    };
+  }
+
+  return {
+    url,
+    result,
+    note: "We couldn't match that link to a product we track. Search by its name instead.",
+  };
+}

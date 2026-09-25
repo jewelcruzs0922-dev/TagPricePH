@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Product, SearchFilters, SearchSort } from "@/lib/types";
-import { filterAndSortProducts, isProductUrl } from "@/lib/data/search-core";
+import { DEFAULT_FILTERS, DEFAULT_SORT } from "@/lib/data/search-core";
+import { buildSearchUrl } from "@/lib/data/search-url";
 import { categories } from "@/lib/data/categories";
 import { stores } from "@/lib/data/stores";
 import { ProductCard } from "@/components/products/ProductCard";
@@ -16,28 +17,73 @@ const sorts: { value: SearchSort; label: string }[] = [
   { value: "recently-updated", label: "Recently updated" },
 ];
 
+const FETCH_DEBOUNCE_MS = 250;
+
+type Phase = "idle" | "loading" | "error";
+
 export function SearchResults({
   initialQuery,
-  matches,
+  initialResults,
+  initialNote,
   brands,
 }: {
   initialQuery: string;
-  /** Query matches produced server-side by the active provider. */
-  matches: Product[];
+  /** Already filtered server-side, so the first paint needs no round trip. */
+  initialResults: Product[];
+  /** How the server read the query (pasted links), shown above the results. */
+  initialNote: string | null;
   /** Facet options for the brand filter, computed server-side. */
   brands: string[];
 }) {
   const [query] = useState(initialQuery);
-  const [filters, setFilters] = useState<SearchFilters>({ inStockOnly: true });
-  const [sort, setSort] = useState<SearchSort>("lowest-price");
+  const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
+  const [sort, setSort] = useState<SearchSort>(DEFAULT_SORT);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const pasted = isProductUrl(query);
+  const [results, setResults] = useState<Product[]>(initialResults);
+  const [note, setNote] = useState<string | null>(initialNote);
+  const [phase, setPhase] = useState<Phase>("idle");
 
-  const results = useMemo(
-    () => filterAndSortProducts(matches, query, filters, sort),
-    [matches, query, filters, sort],
-  );
+  const requestId = useRef(0);
+  const skipFirstFetch = useRef(true);
+
+  // Filters and sort are applied on the server. Each change issues one debounced
+  // request; a stale response can never overwrite a newer one.
+  useEffect(() => {
+    if (skipFirstFetch.current) {
+      skipFirstFetch.current = false;
+      return;
+    }
+
+    const id = requestId.current + 1;
+    requestId.current = id;
+    const controller = new AbortController();
+
+    const timer = window.setTimeout(() => {
+      setPhase("loading");
+
+      fetch(buildSearchUrl(query, filters, sort), { signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return (await response.json()) as { results: Product[]; note: string | null };
+        })
+        .then((data) => {
+          if (id !== requestId.current) return;
+          setResults(data.results);
+          setNote(data.note);
+          setPhase("idle");
+        })
+        .catch(() => {
+          if (controller.signal.aborted || id !== requestId.current) return;
+          setPhase("error");
+        });
+    }, FETCH_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, filters, sort]);
 
   function update<K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -175,7 +221,7 @@ export function SearchResults({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <p className="text-[15px] text-ink-2" aria-live="polite">
             {results.length} {results.length === 1 ? "result" : "results"}
-            {pasted && " for your pasted link"}
+            {phase === "loading" && " · updating…"}
           </p>
           <div className="flex items-center gap-2">
             <label htmlFor="sort-by" className="text-[14px] text-ink-2">
@@ -195,6 +241,22 @@ export function SearchResults({
             </select>
           </div>
         </div>
+
+        {note && (
+          <div className="mb-4 rounded-xl border border-line bg-accent-soft px-4 py-3 text-[15px] text-ink-2">
+            {note}
+          </div>
+        )}
+
+        {phase === "error" && (
+          <p
+            role="alert"
+            className="mb-4 rounded-xl border border-[#B54708]/30 bg-[#B54708]/10 px-4 py-3 text-[15px] text-[#B54708]"
+          >
+            Couldn’t refresh results from the server. Showing the last results we
+            loaded.
+          </p>
+        )}
 
         {results.length === 0 ? (
           <EmptyState />

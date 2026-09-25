@@ -9,7 +9,7 @@
  *
  * Usage: node scripts/match-verify.mjs
  */
-import { matchProduct, tokenize } from "../lib/matching/index.ts";
+import { matchProduct, parseListingUrl, resolveListingUrl, tokenize } from "../lib/matching/index.ts";
 
 const product = (id, slug, name, brand, sku) => ({
   id,
@@ -109,6 +109,71 @@ console.log("\nAmbiguity (say so rather than pick)");
     r.status === "ambiguous",
     `${r.status} · ${r.status === "ambiguous" ? r.reason : r.reason}`,
   );
+}
+
+console.log("\nMarketplace link paste");
+{
+  const parsed = parseListingUrl("https://www.lazada.com.ph/products/iphone-16-128gb-1234567890.html?scm=1");
+  check(
+    "Lazada path yields a title and an id",
+    parsed?.slugTitle === "iphone 16 128gb" && parsed?.listingId === "1234567890",
+    `${parsed?.slugTitle} / ${parsed?.listingId}`,
+  );
+}
+{
+  const parsed = parseListingUrl("https://shopee.ph/Apple-iPhone-16-256GB-i.987654321.1234567");
+  check(
+    "Shopee '-i.id.shopid' suffix is stripped from the title",
+    parsed?.slugTitle === "Apple iPhone 16 256GB",
+    String(parsed?.slugTitle),
+  );
+}
+{
+  const r = resolveListingUrl(
+    "https://www.lazada.com.ph/products/iphone-16-128gb-1234567890.html",
+    catalog,
+  );
+  check("Lazada link resolves to the right product", r.result.status === "match" && r.result.product.slug === "iphone-16-128gb", `${r.result.status} · ${r.note}`);
+}
+{
+  const r = resolveListingUrl("https://shopee.ph/Apple-iPhone-16-256GB-i.987654321.1234567", catalog);
+  check("Shopee slug link resolves to the right product", r.result.status === "match" && r.result.product.slug === "iphone-16-256gb", `${r.result.status} · ${r.note}`);
+}
+{
+  const r = resolveListingUrl("https://shopee.ph/product/987654321/1234567", catalog);
+  check(
+    "id-only link is refused rather than guessed",
+    r.result.status === "no_match" && r.note.includes("listing ID"),
+    `${r.result.status} · ${r.note}`,
+  );
+}
+{
+  const r = resolveListingUrl("https://www.tiktok.com/product/7345678901234567890", catalog);
+  check("TikTok id-only link is refused", r.result.status === "no_match", `${r.result.status} · ${r.note}`);
+}
+{
+  const r = resolveListingUrl("https://www.amazon.com/dp/B0C1234567", catalog);
+  check(
+    "non-marketplace host is named honestly",
+    r.result.status === "no_match" && r.note.includes("Shopee, Lazada, and TikTok Shop"),
+    r.note,
+  );
+}
+{
+  const r = resolveListingUrl("not a link at all", catalog);
+  check("unparseable input is refused", r.result.status === "no_match", r.note);
+}
+{
+  const r = resolveListingUrl("https://www.lazada.com.ph/products/samsung-galaxy-s24-111222333.html", catalog);
+  check(
+    "link omitting storage is flagged ambiguous, not resolved",
+    r.result.status === "ambiguous",
+    `${r.result.status} · ${r.note}`,
+  );
+}
+{
+  const r = resolveListingUrl("https://www.lazada.com.ph/products/completely-generic-item-111222333.html", catalog);
+  check("unrecognisable slug is refused", r.result.status === "no_match", `${r.result.status} · ${r.note}`);
 }
 
 const failed = results.filter((r) => !r.ok);

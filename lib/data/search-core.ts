@@ -16,6 +16,10 @@ export function isProductUrl(query: string): boolean {
   return /^https?:\/\//.test(value) && marketplaceHosts.some((host) => value.includes(host));
 }
 
+/** The landing state of the filters panel — shared so SSR and client agree. */
+export const DEFAULT_FILTERS: SearchFilters = { inStockOnly: true };
+export const DEFAULT_SORT: SearchSort = "lowest-price";
+
 export function filterAndSortProducts(
   products: Product[],
   query: string,
@@ -23,13 +27,11 @@ export function filterAndSortProducts(
   sort: SearchSort = "lowest-price",
 ): Product[] {
   const normalized = query.trim().toLowerCase();
-  const urlSearch = isProductUrl(query);
 
+  // Pasted marketplace links never reach this function with their URL intact:
+  // `runSearch` resolves them through the Phase 5 matcher first and passes an
+  // already-resolved product set with an empty query.
   let results = products.filter((product) => {
-    if (urlSearch) {
-      const haystack = `${product.brand} ${product.name}`.toLowerCase();
-      return haystack.includes("iphone") || haystack.includes("airpods");
-    }
     if (!normalized) return true;
     const haystack = `${product.name} ${product.brand} ${product.category} ${product.sku ?? ""} ${(product.keywords ?? []).join(" ")}`.toLowerCase();
     return normalized.split(/\s+/).every((token) => haystack.includes(token));
