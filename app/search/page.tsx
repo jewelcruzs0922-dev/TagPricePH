@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { SearchBar } from "@/components/search/SearchBar";
 import { SearchResults } from "@/components/search/SearchResults";
 import { getBrands } from "@/lib/data/search";
+import { isDemoData } from "@/lib/data/products";
 import { isProductUrl } from "@/lib/data/search-core";
+import { resolveBuyTimings } from "@/lib/db/observations";
 import { DEFAULT_FILTERS, DEFAULT_SORT, runSearch } from "@/lib/search/run-search";
 
 type SearchPageProps = {
@@ -47,6 +49,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   });
   const brands = getBrands();
   const pastedLink = isProductUrl(q);
+  const timings = await resolveBuyTimings(results);
 
   return (
     <div className="container-page py-8 sm:py-10">
@@ -72,11 +75,18 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         </div>
       </div>
 
+      {isDemoData && (
+        <p className="mb-4 text-[13px] text-ink-3">
+          Sample data — prices shown are illustrative, not live retailer prices.
+        </p>
+      )}
+
       <SearchResults
         key={q}
         initialQuery={q}
         initialResults={results}
         initialNote={note}
+        initialTimings={timings}
         brands={brands}
       />
     </div>

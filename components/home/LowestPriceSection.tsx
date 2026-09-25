@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { Product } from "@/lib/types";
+import type { BuyTiming, Product } from "@/lib/types";
 import {
   evaluateBuyTiming,
   getLowestOffer,
@@ -7,18 +7,50 @@ import {
 } from "@/lib/pricing";
 import { formatCount, formatPeso } from "@/lib/utils/format";
 import { getStore } from "@/lib/data/stores";
+import { isSampleClaim } from "@/lib/trust";
+import { resolvePriceSeries } from "@/lib/db/observations";
 import { StoreLogo } from "@/components/ui/StoreLogo";
 import { PriceHistoryChart } from "@/components/price-history/PriceHistoryChart";
 import {
   Star,
   ArrowRight,
   CheckCircle2,
-  Zap,
+  Clock,
+  TrendingUp,
   HardDrive,
   Monitor,
   Cpu,
   Smartphone,
 } from "lucide-react";
+
+/**
+ * Verdict tone. The panel used to be painted success-green no matter what the
+ * verdict said, so "Consider waiting" and "Not enough history yet" both came
+ * out wearing the colour of a good deal.
+ */
+const timingTone: Record<
+  BuyTiming["status"],
+  { panel: string; badge: string; title: string; Icon: typeof CheckCircle2 }
+> = {
+  good: {
+    panel: "border-success/25 bg-success-soft",
+    badge: "bg-success text-white",
+    title: "text-success",
+    Icon: CheckCircle2,
+  },
+  fair: {
+    panel: "border-line bg-accent-soft/60",
+    badge: "bg-accent text-ink",
+    title: "text-ink",
+    Icon: Clock,
+  },
+  wait: {
+    panel: "border-[#f0d4b5] bg-wait-soft",
+    badge: "bg-wait text-white",
+    title: "text-wait",
+    Icon: TrendingUp,
+  },
+};
 
 function specIcon(spec: string) {
   const lower = spec.toLowerCase();
@@ -45,12 +77,18 @@ function AppleMark({ className }: { className?: string }) {
   );
 }
 
-export function LowestPriceSection({ product }: { product: Product }) {
+export async function LowestPriceSection({ product }: { product: Product }) {
   const lowest = getLowestOffer(product.offers);
   const savings = getSavings(product.offers);
-  const timing = evaluateBuyTiming(product);
+  // Resolved the same way as the product page so the homepage and the detail
+  // page can never disagree about what this product's history says.
+  const series = await resolvePriceSeries(product);
+  const timing = evaluateBuyTiming(product, series.points);
   const sorted = [...product.offers].sort((a, b) => a.price - b.price);
   const bestPrice = sorted[0]?.price ?? 0;
+  const sample = isSampleClaim(product);
+  const tone = timingTone[timing.status];
+  const TimingIcon = tone.Icon;
 
   return (
     <section
@@ -63,6 +101,11 @@ export function LowestPriceSection({ product }: { product: Product }) {
           <span className="eyebrow-yellow">
             Today&apos;s Best Deal
           </span>
+          {sample && (
+            <p className="mt-2 text-[13px] text-ink-2">
+              Sample data — demonstration catalog, not live retailer prices.
+            </p>
+          )}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-[0.85fr_1.1fr_1fr] lg:gap-5">
@@ -101,7 +144,7 @@ export function LowestPriceSection({ product }: { product: Product }) {
                 );
               })}
             </div>
-            {product.rating && (
+            {!sample && product.rating && (
               <p className="mt-4 flex items-center gap-1.5 text-[14px] text-ink-2">
                 <Star className="h-4 w-4 fill-accent text-accent" aria-hidden="true" />
                 <strong className="text-ink">{product.rating.toFixed(1)}</strong>
@@ -113,8 +156,10 @@ export function LowestPriceSection({ product }: { product: Product }) {
           {/* Price + comparison card */}
           <div className="card flex flex-col gap-4 p-5">
             <div className="flex items-start gap-3">
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-success text-white">
-                <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
+              <span
+                className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${tone.badge}`}
+              >
+                <TimingIcon className="h-5 w-5" aria-hidden="true" />
               </span>
               <div>
                 <p className="text-[15px] font-bold text-ink">{timing.label}</p>
@@ -185,23 +230,28 @@ export function LowestPriceSection({ product }: { product: Product }) {
           {/* Chart card */}
           <div className="flex flex-col gap-4 md:col-span-2 lg:col-span-1">
             <PriceHistoryChart
-              history={product.priceHistory}
+              history={series.points}
               currentPrice={lowest?.price ?? 0}
               timing={timing}
+              source={series.source}
               compact
             />
-            <div className="flex items-start gap-3 rounded-2xl border border-success/20 bg-success-soft px-4 py-4">
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-success text-white">
-                <Zap className="h-4 w-4 fill-white" aria-hidden="true" />
+            <div className={`flex items-start gap-3 rounded-2xl border px-4 py-4 ${tone.panel}`}>
+              <span
+                className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${tone.badge}`}
+              >
+                <TimingIcon className="h-4 w-4" aria-hidden="true" />
               </span>
               <div>
-                <p className="text-[15px] font-bold text-success">{timing.label}</p>
+                <p className={`text-[15px] font-bold ${tone.title}`}>{timing.label}</p>
                 <p className="text-[14px] leading-snug text-ink-2">
-                  {Math.abs(timing.percentVsAverage) > 0
-                    ? `This price is ${Math.abs(timing.percentVsAverage)}% ${
-                        timing.percentVsAverage < 0 ? "lower" : "higher"
-                      } than its recent average.`
-                    : "This price is in line with its recent average."}
+                  {timing.insufficient
+                    ? "We need more recorded price observations before we can compare this price with its usual range."
+                    : Math.abs(timing.percentVsAverage) > 0
+                      ? `This price is ${Math.abs(timing.percentVsAverage)}% ${
+                          timing.percentVsAverage < 0 ? "lower" : "higher"
+                        } than its recent average.`
+                      : "This price is in line with its recent average."}
                 </p>
               </div>
             </div>

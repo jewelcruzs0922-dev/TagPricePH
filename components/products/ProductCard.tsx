@@ -1,15 +1,27 @@
 import Link from "next/link";
-import type { Product } from "@/lib/types";
+import type { BuyTiming, Product } from "@/lib/types";
 import { getLowestOffer, getPriceDropPercent, evaluateBuyTiming } from "@/lib/pricing";
 import { getStore } from "@/lib/data/stores";
 import { formatPeso } from "@/lib/utils/format";
 import { StoreLogo } from "@/components/ui/StoreLogo";
 import { ArrowRight } from "lucide-react";
 
-export function ProductCard({ product }: { product: Product }) {
+/**
+ * `timing` is supplied by the page so a list can base every card on the same
+ * recorded series the product page uses (lib/db/observations.ts →
+ * resolveBuyTimings). Without it the card falls back to the catalog series,
+ * which is the honest default while nothing has been recorded.
+ */
+export function ProductCard({
+  product,
+  timing,
+}: {
+  product: Product;
+  timing?: BuyTiming;
+}) {
   const lowest = getLowestOffer(product.offers);
   const drop = getPriceDropPercent(product);
-  const timing = evaluateBuyTiming(product);
+  const verdict = timing ?? evaluateBuyTiming(product);
   const storeId = lowest?.storeId ?? product.offers[0]?.storeId ?? "shopee";
 
   return (
@@ -62,14 +74,14 @@ export function ProductCard({ product }: { product: Product }) {
           </div>
           <span
             className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-bold ${
-              timing.status === "good"
+              verdict.status === "good"
                 ? "bg-success-soft text-success"
-                : timing.status === "fair"
+                : verdict.status === "fair"
                   ? "bg-accent-soft text-ink"
                   : "bg-wait-soft text-wait"
             }`}
           >
-            {timing.label}
+            {verdict.label}
           </span>
         </div>
 

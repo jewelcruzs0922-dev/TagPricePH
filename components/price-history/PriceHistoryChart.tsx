@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { BuyTiming, PricePoint } from "@/lib/types";
+import type { BuyTiming, DataSource, PricePoint } from "@/lib/types";
 import { filterHistory, getAverage } from "@/lib/pricing";
 import { formatPeso } from "@/lib/utils/format";
 
@@ -14,6 +14,12 @@ type PriceHistoryChartProps = {
   timing?: BuyTiming;
   showSummary?: boolean;
   compact?: boolean;
+  /**
+   * Where the series came from. Defaults to "demo" so a caller that forgets to
+   * say gets the honest label rather than presenting generated figures as a
+   * recorded price history.
+   */
+  source?: DataSource;
 };
 
 function formatAxis(price: number): string {
@@ -34,6 +40,7 @@ export function PriceHistoryChart({
   currentPrice,
   showSummary = true,
   compact = false,
+  source = "demo",
 }: PriceHistoryChartProps) {
   const [range, setRange] = useState<Range>("30D");
   const points = useMemo(() => filterHistory(history, range), [history, range]);
@@ -118,6 +125,12 @@ export function PriceHistoryChart({
           ))}
         </div>
       </div>
+
+      {source !== "live" && (
+        <p className="mb-2 text-[12px] leading-snug text-ink-3">
+          Sample history for demonstration — not recorded retailer prices.
+        </p>
+      )}
 
       <div className="relative">
         <svg

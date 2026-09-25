@@ -90,18 +90,65 @@ export function getWindowStats(
   };
 }
 
-export function evaluateBuyTiming(product: Product): BuyTiming {
+/**
+ * Below this many readings, the window statistics describe noise rather than a
+ * pattern. The engine refuses to render a verdict instead of guessing — a
+ * "fair price" computed from three points is a claim the data cannot support.
+ */
+export const MIN_TIMING_OBSERVATIONS = 14;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Names the span a window actually covers, so the copy never claims more
+ * history than exists. Most products carry ~90+ daily readings and keep the
+ * familiar "90-day average"; a product recorded for 40 days says 40.
+ *
+ * Assumes ascending, daily-spaced points — both the catalog series and
+ * getProductSeries() return them that way.
+ */
+function describeWindow(points: PricePoint[]): string {
+  const first = points.length > 0 ? Date.parse(`${points[0].date}T00:00:00Z`) : NaN;
+  const last =
+    points.length > 0 ? Date.parse(`${points[points.length - 1].date}T00:00:00Z`) : NaN;
+  if (Number.isNaN(first) || Number.isNaN(last)) return "recorded";
+
+  const days = Math.max(2, Math.round((last - first) / DAY_MS) + 1);
+  return days >= 85 ? "90-day" : `${days}-day`;
+}
+
+/**
+ * @param history Optional series to judge against. Defaults to the product's
+ *                catalog history; callers holding recorded observations pass
+ *                theirs in so the verdict describes real data.
+ */
+export function evaluateBuyTiming(product: Product, history?: PricePoint[]): BuyTiming {
   const lowest = getLowestOffer(product.offers);
   const current = lowest?.price ?? 0;
-  const { points } = getPriceSeries(product);
+  const points = history ?? getPriceSeries(product).points;
+
+  if (points.length < MIN_TIMING_OBSERVATIONS) {
+    return {
+      status: "fair",
+      label: "Not enough history yet",
+      detail:
+        `Only ${points.length} price observation${points.length === 1 ? "" : "s"} ` +
+        `recorded — we need ${MIN_TIMING_OBSERVATIONS} before comparing today's ` +
+        `price with its usual range.`,
+      percentVsAverage: 0,
+      insufficient: true,
+    };
+  }
+
   const stats = getWindowStats(points, current, "3M");
   const percentVsAverage = stats.percentVsAverage;
+  const window = describeWindow(stats.points);
 
   if (percentVsAverage <= -8) {
     return {
       status: "good",
       label: "Good time to buy",
-      detail: `Price is ${Math.abs(percentVsAverage)}% below its 90-day average.`,
+      detail: `Price is ${Math.abs(percentVsAverage)}% below its ${window} average.`,
       percentVsAverage,
     };
   }
@@ -115,10 +162,13 @@ export function evaluateBuyTiming(product: Product): BuyTiming {
     };
   }
 
+  // Deliberately describes only what the window shows. "Has recently increased"
+  // would be a separate claim, and a price above its average has not always
+  // risen to get there.
   return {
     status: "wait",
     label: "Consider waiting",
-    detail: "Price has recently increased and is above its usual range.",
+    detail: `Price is ${percentVsAverage}% above its ${window} average.`,
     percentVsAverage,
   };
 }

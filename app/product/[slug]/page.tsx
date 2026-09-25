@@ -14,6 +14,8 @@ import { formatPeso } from "@/lib/utils/format";
 import { formatRelativeTime, getFreshness } from "@/lib/utils/freshness";
 import { getStore } from "@/lib/data/stores";
 import { getAffiliateUrl } from "@/lib/api/affiliate";
+import { buildMetaDescription, buildProductJsonLd } from "@/lib/trust";
+import { resolveBuyTimings, resolvePriceSeries } from "@/lib/db/observations";
 import { StoreComparison } from "@/components/comparison/StoreComparison";
 import { SavingsBadge } from "@/components/comparison/SavingsBadge";
 import { BuyTimingIndicator } from "@/components/products/BuyTimingIndicator";
@@ -26,6 +28,15 @@ type ProductPageProps = {
   params: Promise<{ slug: string }>;
 };
 
+/**
+ * Every product is enumerated at build time, so an unknown slug is not a
+ * product — it is a 404. Without this, the segment's `loading.tsx` streams a
+ * 200 header before `notFound()` can throw, and Google indexes a soft 404.
+ *
+ * Revisit when a live provider can introduce products after build.
+ */
+export const dynamicParams = false;
+
 export async function generateStaticParams() {
   const products = await getActiveProvider().listProducts();
   return products.map((product) => ({ slug: product.slug }));
@@ -36,9 +47,7 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
   const product = await getActiveProvider().getProduct(slug);
   if (!product) return { title: "Product not found" };
   const lowest = getLowestOffer(product.offers);
-  const description = lowest
-    ? `${product.name} lowest price is ${formatPeso(lowest.price)}. Compare stores, see price history, and check if it's a good time to buy.`
-    : `Compare prices for ${product.name} across Philippine stores.`;
+  const description = buildMetaDescription(product, lowest?.price ?? null);
   const title = `${product.name} Price Philippines — TagPricePH`;
 
   return {
@@ -67,27 +76,14 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
   const lowest = getLowestOffer(product.offers);
   const savings = getSavings(product.offers);
-  const timing = evaluateBuyTiming(product);
+  const series = await resolvePriceSeries(product);
+  const timing = evaluateBuyTiming(product, series.points);
   const related = await provider.getRelatedProducts(product, 4);
+  const relatedTimings = await resolveBuyTimings(related);
   const bestStore = lowest ? getStore(lowest.storeId) : null;
   const bestHref = lowest && bestStore ? getAffiliateUrl(bestStore, product, { source: "product-hero" }) : "#";
 
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "Product",
-    name: product.name,
-    sku: product.sku,
-    brand: { "@type": "Brand", name: product.brand },
-    offers: product.offers.map((offer) => ({
-      "@type": "Offer",
-      price: offer.price,
-      priceCurrency: "PHP",
-      availability: offer.inStock
-        ? "https://schema.org/InStock"
-        : "https://schema.org/OutOfStock",
-      seller: { "@type": "Organization", name: getStore(offer.storeId).name },
-    })),
-  };
+  const jsonLd = buildProductJsonLd(product);
 
   const category = getCategory(product.category);
   const breadcrumbLd = {
@@ -272,9 +268,10 @@ export default async function ProductPage({ params }: ProductPageProps) {
         </section>
 
         <PriceHistoryChart
-          history={product.priceHistory}
+          history={series.points}
           currentPrice={lowest?.price ?? 0}
           timing={timing}
+          source={series.source}
         />
       </div>
 
@@ -282,31 +279,40 @@ export default async function ProductPage({ params }: ProductPageProps) {
         <h2 id="worth-heading" className="text-[20px] font-extrabold text-ink">
           Is it worth buying now?
         </h2>
+        {series.source !== "live" && (
+          <p className="mt-1 text-[13px] text-ink-2">
+            Sample verdict — drawn from demonstration history, not recorded
+            retailer prices.
+          </p>
+        )}
         <div className="mt-3 grid gap-4 md:grid-cols-[1.2fr_1fr]">
           <p className="text-[16px] leading-relaxed text-ink-2">
-            {timing.status === "good" && (
+            {timing.insufficient ? (
+              <>
+                We do not have enough recorded price history for this product yet,
+                so we will not guess whether now is a good time to buy. The
+                comparison below still shows today&apos;s prices across stores.
+              </>
+            ) : timing.status === "good" ? (
               <>
                 Yes — this looks like a solid moment. The current lowest price is{" "}
-                <strong className="text-ink">{formatPeso(lowest?.price ?? 0)}</strong>,{" "}
-                {timing.detail.replace("Price is", "which is").replace(/\.$/, "")} compared
-                with the usual price over the last three months. If it fits your budget,
+                <strong className="text-ink">{formatPeso(lowest?.price ?? 0)}</strong>.{" "}
+                {timing.detail.replace(/^Price is/, "It is")} If it fits your budget,
                 you are not buying at a spike.
               </>
-            )}
-            {timing.status === "fair" && (
+            ) : timing.status === "fair" ? (
               <>
                 It is priced within its usual range at{" "}
                 <strong className="text-ink">{formatPeso(lowest?.price ?? 0)}</strong>.
                 Not a standout deal, but also not inflated. Buy if you need it now, or set
                 an alert if you can wait for a drop.
               </>
-            )}
-            {timing.status === "wait" && (
+            ) : (
               <>
                 You may want to hold off. The lowest price (
-                <strong className="text-ink">{formatPeso(lowest?.price ?? 0)}</strong>)
-                sits above its recent average. Set a price alert and we will keep this
-                product on your watchlist on this device.
+                <strong className="text-ink">{formatPeso(lowest?.price ?? 0)}</strong>){" "}
+                {timing.detail.replace(/^Price is /, "is ")} Set a price alert and we
+                will keep this product on your watchlist on this device.
               </>
             )}
           </p>
@@ -332,7 +338,11 @@ export default async function ProductPage({ params }: ProductPageProps) {
         </div>
         <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
           {related.map((item) => (
-            <ProductCard key={item.id} product={item} />
+            <ProductCard
+              key={item.id}
+              product={item}
+              timing={relatedTimings[item.slug]}
+            />
           ))}
         </div>
       </section>

@@ -3,6 +3,7 @@ import type { Product, StoreOffer } from "@/lib/types";
 import { getStore } from "@/lib/data/stores";
 import { getAffiliateUrl } from "@/lib/api/affiliate";
 import { formatDiff, formatPeso } from "@/lib/utils/format";
+import { formatRelativeTime, getFreshness } from "@/lib/utils/freshness";
 import { StoreLogo } from "@/components/ui/StoreLogo";
 
 type StoreComparisonProps = {
@@ -119,6 +120,24 @@ export function StoreComparison({
   );
 }
 
+/**
+ * Per-offer freshness.
+ *
+ * Only rendered for observed (live) readings: a demo offer's `updatedAt` is
+ * generated, so printing "checked 2 hours ago" underneath it would be inventing
+ * a check that never happened.
+ */
+function OfferFreshness({ offer }: { offer: StoreOffer }) {
+  if (offer.source !== "live") return null;
+  const stale = getFreshness(offer.updatedAt) !== "fresh";
+  return (
+    <p className="text-[12px] leading-snug text-ink-3">
+      {stale && <span className="font-semibold text-wait">May be out of date · </span>}
+      Checked {formatRelativeTime(offer.updatedAt)}
+    </p>
+  );
+}
+
 function StoreOfferIdentity({
   offer,
   isBest,
@@ -144,6 +163,7 @@ function StoreOfferIdentity({
             </span>
           )}
         </div>
+        <OfferFreshness offer={offer} />
       </div>
     </div>
   );
@@ -257,6 +277,7 @@ function StoreOfferRow({
             )}
           </div>
           <p className="text-[16px] font-bold text-ink">{formatPeso(offer.price)}</p>
+          <OfferFreshness offer={offer} />
         </div>
         <div className="flex flex-col items-end gap-1.5">
           {offer.inStock && diff > 0 && (

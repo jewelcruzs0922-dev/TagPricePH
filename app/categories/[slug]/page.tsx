@@ -3,9 +3,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { categories, getCategory } from "@/lib/data/categories";
-import { products } from "@/lib/data/products";
+import { products, isDemoData } from "@/lib/data/products";
 import { baseUrl } from "@/lib/utils/seo";
 import { ProductCard } from "@/components/products/ProductCard";
+import { resolveBuyTimings } from "@/lib/db/observations";
 import { EmptyState } from "@/components/ui/States";
 
 type CategoryPageProps = {
@@ -40,6 +41,7 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
   if (!category) notFound();
 
   const items = products.filter((product) => product.category === category.slug);
+  const timings = await resolveBuyTimings(items);
 
   const breadcrumbLd = {
     "@context": "https://schema.org",
@@ -82,6 +84,11 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
           {category.name}
         </h1>
         <p className="mt-1 text-[16px] text-ink-2">{category.blurb}</p>
+        {isDemoData && (
+          <p className="mt-2 text-[13px] text-ink-3">
+            Sample data — prices shown are illustrative, not live retailer prices.
+          </p>
+        )}
       </div>
 
       {items.length === 0 ? (
@@ -94,7 +101,11 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
       ) : (
         <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           {items.map((product) => (
-            <ProductCard key={product.id} product={product} />
+            <ProductCard
+              key={product.id}
+              product={product}
+              timing={timings[product.slug]}
+            />
           ))}
         </div>
       )}

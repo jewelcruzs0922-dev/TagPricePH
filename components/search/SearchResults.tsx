@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Product, SearchFilters, SearchSort } from "@/lib/types";
+import type { BuyTiming, Product, SearchFilters, SearchSort } from "@/lib/types";
 import { DEFAULT_FILTERS, DEFAULT_SORT } from "@/lib/data/search-core";
 import { buildSearchUrl } from "@/lib/data/search-url";
 import { categories } from "@/lib/data/categories";
@@ -25,6 +25,7 @@ export function SearchResults({
   initialQuery,
   initialResults,
   initialNote,
+  initialTimings,
   brands,
 }: {
   initialQuery: string;
@@ -32,6 +33,11 @@ export function SearchResults({
   initialResults: Product[];
   /** How the server read the query (pasted links), shown above the results. */
   initialNote: string | null;
+  /**
+   * Verdict per product slug, computed server-side from the recorded series so
+   * these cards say the same thing the product page would.
+   */
+  initialTimings?: Record<string, BuyTiming>;
   /** Facet options for the brand filter, computed server-side. */
   brands: string[];
 }) {
@@ -42,6 +48,9 @@ export function SearchResults({
 
   const [results, setResults] = useState<Product[]>(initialResults);
   const [note, setNote] = useState<string | null>(initialNote);
+  const [timings, setTimings] = useState<Record<string, BuyTiming>>(
+    initialTimings ?? {},
+  );
   const [phase, setPhase] = useState<Phase>("idle");
 
   const requestId = useRef(0);
@@ -65,12 +74,17 @@ export function SearchResults({
       fetch(buildSearchUrl(query, filters, sort), { signal: controller.signal })
         .then(async (response) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return (await response.json()) as { results: Product[]; note: string | null };
+          return (await response.json()) as {
+            results: Product[];
+            note: string | null;
+            timings?: Record<string, BuyTiming>;
+          };
         })
         .then((data) => {
           if (id !== requestId.current) return;
           setResults(data.results);
           setNote(data.note);
+          setTimings(data.timings ?? {});
           setPhase("idle");
         })
         .catch(() => {
@@ -263,7 +277,11 @@ export function SearchResults({
         ) : (
           <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
             {results.map((product: Product) => (
-              <ProductCard key={product.id} product={product} />
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  timing={timings[product.slug]}
+                />
             ))}
           </div>
         )}

@@ -18,7 +18,8 @@ export function PriceDropsSection({ products }: { products: Product[] }) {
             Price Drops Today
           </h2>
           <p className="mt-1 text-[15px] text-ink-2">
-            Limited time deals. Don&apos;t miss out!
+            Products whose sample price sits below the product&apos;s previous
+            listed price.
           </p>
         </div>
         <Link

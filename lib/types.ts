@@ -49,6 +49,12 @@ export type BuyTiming = {
   label: string;
   detail: string;
   percentVsAverage: number;
+  /**
+   * Set when there is not yet enough recorded history to compare against, so
+   * the label reads "Not enough history yet" instead of asserting a verdict
+   * the data cannot support.
+   */
+  insufficient?: boolean;
 };
 
 export type Product = {

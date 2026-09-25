@@ -7,10 +7,17 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run lint && npm run build && npm run trust:verify && npm run db:verify && npm run match:verify && npm run obs:verify && npm run ingest:verify",
+    "verify:full": "npm run verify && npm run recorded:verify",
     "db:migrate": "node scripts/migrate.mjs",
     "db:status": "node scripts/migrate.mjs --status",
     "db:verify": "node scripts/db-verify.mjs",
-    "match:verify": "node scripts/match-verify.mjs"
+    "match:verify": "node scripts/match-verify.mjs",
+    "trust:verify": "node scripts/trust-verify.mjs",
+    "obs:verify": "node scripts/observations-verify.mjs",
+    "ingest:verify": "node scripts/ingest-verify.mjs",
+    "recorded:verify": "node scripts/recorded-history-verify.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.48.0",
