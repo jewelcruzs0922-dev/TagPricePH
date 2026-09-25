@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import type { Product } from "@/lib/types";
 import { getLowestOffer, getPriceDropPercent, type RecordedDrop } from "@/lib/pricing";
+import { isSampleClaim } from "@/lib/trust";
 import { getStore } from "@/lib/data/stores";
 import { formatPeso } from "@/lib/utils/format";
 import { StoreLogo } from "@/components/ui/StoreLogo";
@@ -15,7 +16,7 @@ type PriceDropCardProps = {
 
 export function PriceDropCard({ product, recorded }: PriceDropCardProps) {
   const lowest = getLowestOffer(product.offers);
-  const drop = recorded?.percent ?? getPriceDropPercent(product) ?? 0;
+  const drop = recorded?.percentageDrop ?? getPriceDropPercent(product) ?? 0;
   const storeId = lowest?.storeId ?? product.offers[0]?.storeId ?? "shopee";
 
   return (
@@ -43,7 +44,7 @@ export function PriceDropCard({ product, recorded }: PriceDropCardProps) {
           <p className="text-[22px] font-extrabold tracking-tight text-ink">
             {lowest ? formatPeso(lowest.price) : "—"}
           </p>
-          {!recorded && product.previousPrice && (
+          {!recorded && isSampleClaim(product) && product.previousPrice && (
             <p className="text-[14px] text-ink-3 line-through">
               {formatPeso(product.previousPrice)}
             </p>

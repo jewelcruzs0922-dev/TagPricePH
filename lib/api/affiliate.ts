@@ -6,26 +6,6 @@ export type AffiliateContext = {
 };
 
 /**
- * Per-marketplace affiliate configuration.
- *
- * `params` stays empty until real credentials exist. Never invent tracking
- * parameters — a fabricated affiliate param is worse than none, because it
- * silently breaks attribution and misrepresents the link as tracked.
- */
-export type AffiliateConfig = {
-  enabled: boolean;
-  params: Record<string, string>;
-};
-
-export const affiliateConfig: Record<string, AffiliateConfig> = {
-  shopee: { enabled: false, params: {} },
-  lazada: { enabled: false, params: {} },
-  tiktok: { enabled: false, params: {} },
-  abensons: { enabled: false, params: {} },
-  sm: { enabled: false, params: {} },
-};
-
-/**
  * Hosts we are allowed to redirect to. Anything else is refused.
  * This matters the moment offer URLs stop coming from static seed data.
  */
@@ -54,19 +34,44 @@ export function isSafeRedirectUrl(raw: string): boolean {
 }
 
 /**
- * Resolves the outbound destination for an offer and validates it.
- * Returns null when the destination is missing, malformed, or not on
- * the allowlist — callers must treat null as "no deal available".
+ * The single place that decides where an outbound click goes.
+ *
+ *   offer.affiliates a real affiliate link → use it
+ *   otherwise                     → use the retailer's normal product URL
+ *   neither is a safe, allowlisted https URL → null ("no deal available")
+ *
+ * Two rules this exists to keep:
+ *
+ *  1. A normal marketplace URL is not an affiliate URL. `affiliateUrl` is
+ *     present only when a provider stored the link that marketplace's own
+ *     programme issued; nothing here ever derives one, and a missing
+ *     affiliate URL is a perfectly good outcome rather than a gap to fill.
+ *  2. Destinations are allowlisted. A stored URL is attacker-controlled the
+ *     moment a provider or a database write is, so `/go/...` must never be
+ *     able to redirect to an arbitrary host, a `javascript:` scheme, or a
+ *     `data:` payload.
+ *
+ * Marketplace-specific construction does not belong anywhere else: no
+ * component, route, or helper may assemble an outbound URL itself.
  */
-export function resolveOfferDestination(offer: StoreOffer): string | null {
-  if (!offer.url) return null;
-  if (!isSafeRedirectUrl(offer.url)) return null;
-  return offer.url;
+export function resolveOutboundUrl(offer: StoreOffer): string | null {
+  if (offer.affiliateUrl && isSafeRedirectUrl(offer.affiliateUrl)) {
+    return offer.affiliateUrl;
+  }
+  if (offer.url && isSafeRedirectUrl(offer.url)) {
+    return offer.url;
+  }
+  return null;
 }
 
 /**
  * Builds the outbound retailer URL for a store offer.
- * Affiliate parameters belong here — never inside UI components.
+ *
+ * This is TagPricePH's own redirect path, not the retailer's URL — the
+ * affiliate link, when one exists, is stored on the offer and resolved by
+ * `resolveOutboundUrl` at click time. No tracking parameter is appended
+ * anywhere: a fabricated `?ref=` would misrepresent an untracked link as a
+ * tracked one.
  */
 export function getAffiliateUrl(
   store: Pick<Store, "id" | "name">,
@@ -74,10 +79,10 @@ export function getAffiliateUrl(
   context: AffiliateContext = {},
 ): string {
   const params = new URLSearchParams();
-  params.set("ref", "tagpriceph");
   if (context.campaign) params.set("campaign", context.campaign);
   if (context.source) params.set("source", context.source);
-  return `/go/${store.id}/${product.slug}?${params.toString()}`;
+  const query = params.toString();
+  return `/go/${store.id}/${product.slug}${query ? `?${query}` : ""}`;
 }
 
 export function getRedirectPath(storeId: string, productSlug: string): string {

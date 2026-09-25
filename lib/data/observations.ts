@@ -20,9 +20,21 @@ export function getOfferId(productSlug: string, storeId: string): string {
   return `${productSlug}:${storeId}`;
 }
 
-/** Source tag for a product's data, taken from its offers. */
+/**
+ * Source tag for a product's data, taken from its offers — conservatively.
+ *
+ * A product is only "live" when *every* offer backing it is live. One demo
+ * offer, one unreadable source, or no offers at all means we do not know, and
+ * "do not know" is reported as demo: a mixed Shopee-live / Lazada-demo product
+ * must never be represented as live, because that single word is what the
+ * sample labels, the structured data, and the SERP snippet all hang from.
+ *
+ * The alternative — reading the first offer — made the classification depend
+ * on row order, so the same product could flip its answer between reads.
+ */
 export function getDataSource(product: Product): DataSource {
-  return product.offers[0]?.source ?? "demo";
+  if (product.offers.length === 0) return "demo";
+  return product.offers.every((offer) => offer.source === "live") ? "live" : "demo";
 }
 
 /** Latest observation per offer — the product's current price state. */

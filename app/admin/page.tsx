@@ -123,10 +123,11 @@ function Dashboard({ stats }: { stats: AdminStats }) {
       </Section>
 
       <Section title="Offer freshness" adminKey="freshness">
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Stat label="Fresh (≤48h)" value={stats.freshness.fresh} />
-          <Stat label="Stale (≤14d)" value={stats.freshness.stale} />
-          <Stat label="Unavailable" value={stats.freshness.unavailable} />
+          <Stat label="Aging (≤14d)" value={stats.freshness.aging} />
+          <Stat label="Stale (>14d)" value={stats.freshness.stale} />
+          <Stat label="Unknown timestamp" value={stats.freshness.unknown} />
           <Stat
             label="Oldest checked"
             value={
@@ -140,7 +141,8 @@ function Dashboard({ stats }: { stats: AdminStats }) {
         </div>
         <p className="mt-3 text-sm text-ink-3">
           Thresholds come from lib/utils/freshness.ts and are configurable per
-          provider cadence. A stale offer is never shown as a current price.
+          provider cadence. Stale and undated offers are never counted in a
+          current-price ranking — they are shown as history, clearly labelled.
         </p>
       </Section>
 

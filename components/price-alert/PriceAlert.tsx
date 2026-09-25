@@ -128,10 +128,15 @@ export function PriceAlertForm({
 }: {
   productSlug: string;
   productName: string;
-  suggestedPrice: number;
+  /** Today's price, or null when the product has no qualifying current price. */
+  suggestedPrice: number | null;
 }) {
   const { email, setEmail } = useEmailField();
-  const [target, setTarget] = useState(String(Math.round(suggestedPrice * 0.9)));
+  // Prefill only from a real price: guessing a default from nothing would
+  // put a target on screen that nobody has any reason to believe in.
+  const [target, setTarget] = useState(
+    suggestedPrice ? String(Math.round(suggestedPrice * 0.9)) : "",
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Carries the email it was fetched under: switching accounts hides a watch
@@ -318,7 +323,9 @@ export function PriceAlertForm({
           </button>
         </div>
         <p id={`alert-hint-${productSlug}`} className="text-[13px] text-ink-3">
-          Current lowest is around {formatPeso(suggestedPrice)}.
+          {suggestedPrice
+            ? `Current lowest is around ${formatPeso(suggestedPrice)}.`
+            : "No current price is available for this product right now — enter any target you want to watch."}
         </p>
       </form>
 

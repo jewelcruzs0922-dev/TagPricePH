@@ -11,17 +11,21 @@
  *                           `product_variants` exists for feeds that express
  *                           options as one product with attributes.
  *   Marketplace listing / → StoreOffer: one row per store's listing of a
- *   Store offer             product (unique per product+store in `offers`),
- *                           carrying price, availability, url, freshness
+ *   Store offer             product (unique per product+store+external listing
+ *                           id in `offers`), carrying price, availability, url,
+ *                           freshness, and — when a marketplace actually
+ *                           issues one — a separate affiliate URL
  *   Price observation     → PriceObservation + the price_observations table —
  *                           strictly separate from current price: current =
  *                           latest observation, history = the series. The TS
  *                           priceHistory field is the demo series only.
  *   Store                 → Store + the `stores` table
- *   Affiliate information → lib/api/affiliate.ts configuration. Never stored
- *                           on the offer and never assembled in components:
+ *   Affiliate information → StoreOffer.affiliateUrl, set only when a provider
+ *                           hands us that marketplace's real affiliate link.
+ *                           Never assembled in components and never guessed:
  *                           affiliate_url stays NULL until real credentials
  *                           exist (Phase 9 — never fabricate parameters).
+ *                           A normal product URL is not an affiliate URL.
  */
 
 export type Store = {
@@ -40,7 +44,18 @@ export type DataSource = "demo" | "live";
 
 export type Availability = "in_stock" | "out_of_stock";
 
-export type FreshnessState = "fresh" | "stale" | "unavailable";
+/**
+ * How old an offer's last check is, in four states rather than three.
+ *
+ * "fresh"    — within the provider's normal cadence: a confident current price.
+ * "aging"    — past cadence but inside the freshness window: rankable, shown
+ *              with a "may be out of date" note.
+ * "stale"    — past the freshness window: contextual data only. It may still
+ *              be displayed, but it must never win a current-price ranking.
+ * "unknown"  — the timestamp cannot be read, so its age is unknowable. Treated
+ *              like stale for ranking: we do not rank what we cannot date.
+ */
+export type FreshnessState = "fresh" | "aging" | "stale" | "unknown";
 
 export type PricePoint = {
   date: string;
@@ -63,7 +78,17 @@ export type PriceObservation = {
 export type StoreOffer = {
   storeId: string;
   price: number;
+  /** The retailer's own page for this listing — what we fall back to. */
   url: string;
+  /**
+   * That marketplace's real affiliate link for this listing, when the
+   * affiliate programme has actually issued one. Null/absent is the normal
+   * state and the system works without it; an affiliate URL is never
+   * synthesised from the product URL.
+   */
+  affiliateUrl?: string;
+  /** `marketplace_listings.id` this offer is the current state of, when known. */
+  listingId?: number;
   updatedAt: string;
   inStock: boolean;
   source: DataSource;
@@ -97,6 +122,10 @@ export type Product = {
   brand: string;
   category: string;
   sku?: string;
+  /** Manufacturer model number, when the catalog knows it — matches by it first. */
+  modelNumber?: string;
+  /** GTIN/EAN/UPC, when the catalog knows it — the strongest identity we have. */
+  gtin?: string;
   tagline?: string;
   keywords?: string[];
   image: string;

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { Product } from "@/lib/types";
 import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
@@ -8,6 +9,7 @@ import { getCategory } from "@/lib/data/categories";
 import { baseUrl } from "@/lib/utils/seo";
 import {
   evaluateBuyTiming,
+  getEligibleCurrentOffers,
   getLowestOffer,
   getRecordedPriceDrop,
   getSavings,
@@ -16,7 +18,7 @@ import { formatPeso } from "@/lib/utils/format";
 import { formatRelativeTime, getFreshness } from "@/lib/utils/freshness";
 import { getStore } from "@/lib/data/stores";
 import { getAffiliateUrl } from "@/lib/api/affiliate";
-import { buildMetaDescription, buildProductJsonLd } from "@/lib/trust";
+import { buildMetaDescription, buildProductJsonLd, isSampleClaim } from "@/lib/trust";
 import { resolveBuyTimings, resolvePriceSeries } from "@/lib/db/observations";
 import { StoreComparison } from "@/components/comparison/StoreComparison";
 import { ProductViewTracker } from "@/components/analytics/ProductViewTracker";
@@ -25,11 +27,27 @@ import { BuyTimingIndicator } from "@/components/products/BuyTimingIndicator";
 import { PriceHistoryChart } from "@/components/price-history/PriceHistoryChart";
 import { PriceAlertForm } from "@/components/price-alert/PriceAlert";
 import { ProductCard } from "@/components/products/ProductCard";
-import { isDemoData, DEMO_AS_OF } from "@/lib/data/products";
 
 type ProductPageProps = {
   params: Promise<{ slug: string }>;
 };
+
+const SAMPLE_DATE_FORMAT = new Intl.DateTimeFormat("en-PH", {
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+});
+
+/** The date shown beside a sample label: this product's own newest reading. */
+function formatSampleDate(product: Product): string {
+  const newest = product.offers.reduce(
+    (max, offer) => Math.max(max, Date.parse(offer.updatedAt)),
+    0,
+  );
+  return Number.isFinite(newest) && newest > 0
+    ? SAMPLE_DATE_FORMAT.format(newest)
+    : "an earlier run";
+}
 
 /**
  * Every product is enumerated at build time, so an unknown slug is not a
@@ -81,6 +99,20 @@ export default async function ProductPage({ params }: ProductPageProps) {
   const savings = getSavings(product.offers);
   const series = await resolvePriceSeries(product);
   const timing = evaluateBuyTiming(product, series.points);
+  // Sample status comes from this product's own offers, not from a global
+  // flag about the seed catalog: with DATA_PROVIDER=db a live row must not be
+  // labelled sample, and a sample row must never be labelled live.
+  const sampleShown = isSampleClaim(product);
+  // The date beside a sample label is this product's own newest reading, so
+  // the stamp always describes the figures on screen.
+  const sampleAsOf = formatSampleDate(product);
+  // One eligibility funnel for the whole page: the "Highest" a shopper could
+  // actually buy today, so it can never sit beside a "You could save" figure
+  // computed from a different set of offers.
+  const eligibleOffers = getEligibleCurrentOffers(product.offers);
+  const eligibleHighest = eligibleOffers.length
+    ? Math.max(...eligibleOffers.map((item) => item.price))
+    : null;
   // Null while the observation store is empty — the demo reference price must
   // never be dressed up as a recorded drop.
   const recordedDrop = getRecordedPriceDrop(series, lowest?.price ?? 0);
@@ -167,14 +199,14 @@ export default async function ProductPage({ params }: ProductPageProps) {
               </span>
             ))}
           </div>
-          {!isDemoData && product.rating && (
+          {!sampleShown && product.rating && (
             <p className="mt-3 flex items-center gap-1.5 text-[14px] text-ink-2">
               <Star className="h-4 w-4 fill-accent text-accent" aria-hidden="true" />
               <strong className="text-ink">{product.rating.toFixed(1)}</strong>
               ({(product.reviewCount ?? 0).toLocaleString("en-PH")} reviews)
             </p>
           )}
-          {isDemoData && (
+          {sampleShown && (
             <p className="mt-4 text-[13px] text-ink-3">
               Sample listing for demonstration. Images and prices are illustrative.
             </p>
@@ -216,9 +248,9 @@ export default async function ProductPage({ params }: ProductPageProps) {
               </p>
             )}
             <p className="mt-2 text-[13px] text-ink-3">
-              {isDemoData ? (
+              {sampleShown ? (
                 <>
-                  Sample data · last updated {DEMO_AS_OF} — not live prices
+                  Sample data · last updated {sampleAsOf} — not live prices
                 </>
               ) : lowest ? (
                 <>
@@ -256,7 +288,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
           <PriceAlertForm
             productSlug={product.slug}
             productName={product.name}
-            suggestedPrice={lowest?.price ?? 0}
+            suggestedPrice={lowest?.price ?? null}
           />
         </div>
       </div>
@@ -267,8 +299,10 @@ export default async function ProductPage({ params }: ProductPageProps) {
             Compare prices
           </h2>
           <p className="mb-4 mt-1 text-[15px] text-ink-2">
-            Highest {formatPeso(Math.max(...product.offers.map((o) => o.price)))} ·
-            Lowest {formatPeso(lowest?.price ?? 0)}
+            {eligibleHighest !== null
+              ? `Highest ${formatPeso(eligibleHighest)}`
+              : "Highest unavailable"}
+            {lowest ? ` · Lowest ${formatPeso(lowest.price)}` : " · Lowest unavailable"}
             {savings > 0 && (
               <>
                 {" "}
@@ -282,7 +316,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
         <PriceHistoryChart
           history={series.points}
-          currentPrice={lowest?.price ?? 0}
+          currentPrice={lowest?.price ?? null}
           timing={timing}
           source={series.source}
         />
@@ -332,7 +366,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
           <div className="rounded-xl border border-line bg-cream p-4 text-[14px] text-ink-2">
             <p className="font-semibold text-ink">Plain-language summary</p>
             <ul className="mt-2 space-y-1.5">
-              <li>• Lowest now: {formatPeso(lowest?.price ?? 0)}</li>
+              <li>• Lowest now: {lowest ? formatPeso(lowest.price) : "Unavailable"}</li>
               <li>• You could save: {formatPeso(savings)}</li>
               <li>• Verdict: {timing.label}</li>
             </ul>

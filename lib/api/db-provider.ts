@@ -59,14 +59,15 @@ export const dbProvider: MarketplaceProvider = {
 
   /** SQL prefilter (§21) → the same in-process ranking the demo catalog uses. */
   async searchProducts(search: string): Promise<Product[]> {
-    const words = search
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((word) => `%${word.replace(/[\\%_]/g, (char) => `\\${char}`)}%`);
+    const words = search.trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) return [];
 
-    const rows = await query<CatalogProductRow>(CATALOG_SEARCH_SQL, [words]);
+    // $1: substring patterns for the text fields. % / _ are escaped so a query
+    // for "50%" is a literal, not a wildcard.
+    const patterns = words.map((word) => `%${word.replace(/[\\%_]/g, (char) => `\\${char}`)}%`);
+    // $2: the raw words, for exact identifier equality (SKU / model / GTIN /
+    // marketplace listing id).
+    const rows = await query<CatalogProductRow>(CATALOG_SEARCH_SQL, [patterns, words]);
     const candidates = await withRelatedData(rows);
     return filterAndSortProducts(candidates, search, {}, "lowest-price");
   },

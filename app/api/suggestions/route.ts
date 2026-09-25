@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSuggestions } from "@/lib/data/search";
-import { toClientProducts } from "@/lib/data/search-core";
+import { getActiveProvider } from "@/lib/api/registry";
+import { filterSuggestions, toClientProducts } from "@/lib/data/search-core";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +14,10 @@ export const dynamic = "force-dynamic";
  * five products the client-side filter used to pick — after
  * `toClientProducts`, so the response carries no price history either.
  *
+ * The candidates come from the active provider rather than from the sample
+ * seed, so typeahead cannot offer products the site does not actually serve
+ * once reads move to the database (§19).
+ *
  * A failed request returns an empty list with the error status rather than a
  * shape the caller has to defend against; the bar treats both as "no
  * suggestions" and keeps working.
@@ -21,7 +25,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const q = request.nextUrl.searchParams.get("q") ?? "";
-    return NextResponse.json(toClientProducts(getSuggestions(q)));
+    const matches = await getActiveProvider().searchProducts(q);
+    return NextResponse.json(toClientProducts(filterSuggestions(matches, q)));
   } catch {
     return NextResponse.json(
       { error: "suggestions failed" },

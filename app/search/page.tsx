@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { SearchBar } from "@/components/search/SearchBar";
 import { SearchResults } from "@/components/search/SearchResults";
-import { getBrands } from "@/lib/data/search";
-import { isDemoData } from "@/lib/data/products";
+import { getCatalogBrands } from "@/lib/data/catalog";
 import { isProductUrl, toClientProducts } from "@/lib/data/search-core";
+import { isSampleClaim } from "@/lib/trust";
 import { resolveBuyTimings } from "@/lib/db/observations";
 import { DEFAULT_FILTERS, DEFAULT_SORT, SEARCH_PAGE_SIZE, runSearch } from "@/lib/search/run-search";
 
@@ -47,8 +47,11 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     filters: DEFAULT_FILTERS,
     sort: DEFAULT_SORT,
   });
-  const brands = getBrands();
+  const brands = await getCatalogBrands();
   const pastedLink = isProductUrl(q);
+  // Conservative: the caveat shows if any result is sample data, so a mixed
+  // result set can never read as a page of live prices.
+  const sampleShown = results.some((product) => isSampleClaim(product));
   // The count is the full result set; the first paint only carries a window
   // of it. "Show more" asks the server for the next slice.
   const window = results.slice(0, SEARCH_PAGE_SIZE);
@@ -78,7 +81,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         </div>
       </div>
 
-      {isDemoData && (
+      {sampleShown && (
         <p className="mb-4 text-[13px] text-ink-3">
           Sample data — prices shown are illustrative, not live retailer prices.
         </p>

@@ -1,5 +1,5 @@
 import type { Product, SearchFilters, SearchSort } from "@/lib/types";
-import { getLowestOffer, getPriceDropPercent } from "@/lib/pricing";
+import { getLowestOffer, getPriceDropPercent, getSavings } from "@/lib/pricing";
 import { matchQueryIn, type QueryMatch } from "@/lib/search/typo";
 
 /**
@@ -19,7 +19,17 @@ export function isProductUrl(query: string): boolean {
 
 /** The text a search query is matched against, lowercased. */
 function searchHaystack(product: Product): string {
-  return `${product.name} ${product.brand} ${product.category} ${product.sku ?? ""} ${(product.keywords ?? []).join(" ")}`.toLowerCase();
+  return [
+    product.name,
+    product.brand,
+    product.category,
+    product.sku ?? "",
+    product.modelNumber ?? "",
+    product.gtin ?? "",
+    (product.keywords ?? []).join(" "),
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 /**
@@ -121,15 +131,15 @@ export function filterAndSortProducts(
     );
   }
 
-  const lowestPrice = (product: Product) => getLowestOffer(product.offers)?.price ?? 0;
+  // Ranking runs on eligible current offers only (lib/pricing). A product
+  // with no valid current price has no lowest price to sort by, so it sinks
+  // to the end rather than floating to the top on a price of 0.
+  const lowestPrice = (product: Product) => getLowestOffer(product.offers)?.price ?? null;
 
   results = [...results].sort((a, b) => {
     switch (sort) {
-      case "biggest-savings": {
-        const saveA = Math.max(...a.offers.map((o) => o.price)) - lowestPrice(a);
-        const saveB = Math.max(...b.offers.map((o) => o.price)) - lowestPrice(b);
-        return saveB - saveA;
-      }
+      case "biggest-savings":
+        return getSavings(b.offers) - getSavings(a.offers);
       case "biggest-drop": {
         const dropA = getPriceDropPercent(a) ?? 0;
         const dropB = getPriceDropPercent(b) ?? 0;
@@ -141,8 +151,14 @@ export function filterAndSortProducts(
         return updatedB - updatedA;
       }
       case "lowest-price":
-      default:
-        return lowestPrice(a) - lowestPrice(b);
+      default: {
+        const priceA = lowestPrice(a);
+        const priceB = lowestPrice(b);
+        if (priceA === priceB) return 0;
+        if (priceA === null) return 1;
+        if (priceB === null) return -1;
+        return priceA - priceB;
+      }
     }
   });
 

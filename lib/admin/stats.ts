@@ -8,9 +8,9 @@ import {
   probeProvider,
 } from "@/lib/api/registry";
 import { categories } from "@/lib/data/categories";
-import { products } from "@/lib/data/products";
 import { stores } from "@/lib/data/stores";
 import { query } from "@/lib/db";
+import type { Product } from "@/lib/types";
 import { getFreshness } from "@/lib/utils/freshness";
 
 /**
@@ -33,8 +33,9 @@ export type ProviderStatus = {
 
 export type FreshnessCounts = {
   fresh: number;
+  aging: number;
   stale: number;
-  unavailable: number;
+  unknown: number;
   /** Oldest last-checked stamp across every offer, ISO or null. */
   oldest: string | null;
 };
@@ -98,7 +99,7 @@ function providerList(): ProviderStatus[] {
   return getRegisteredProviderIds().map((id) => ({ id, ...probeProvider(id) }));
 }
 
-function catalogCounts(): AdminStats["catalog"] {
+function catalogCounts(products: Product[]): AdminStats["catalog"] {
   let offers = 0;
   let historyRows = 0;
   let productsWithoutHistory = 0;
@@ -118,8 +119,8 @@ function catalogCounts(): AdminStats["catalog"] {
 }
 
 /** Offer status by freshness: how much of the catalog is past its window. */
-function freshnessCounts(): FreshnessCounts {
-  const counts: FreshnessCounts = { fresh: 0, stale: 0, unavailable: 0, oldest: null };
+function freshnessCounts(products: Product[]): FreshnessCounts {
+  const counts: FreshnessCounts = { fresh: 0, aging: 0, stale: 0, unknown: 0, oldest: null };
   let oldestMs = Number.POSITIVE_INFINITY;
   for (const product of products) {
     for (const offer of product.offers) {
@@ -133,7 +134,7 @@ function freshnessCounts(): FreshnessCounts {
 }
 
 /** Day-over-day moves beyond 50% in the recorded sample series — flagged, not hidden. */
-function anomalyCount(): number {
+function anomalyCount(products: Product[]): number {
   let anomalies = 0;
   for (const product of products) {
     const series = product.priceHistory;
@@ -147,8 +148,28 @@ function anomalyCount(): number {
   return anomalies;
 }
 
+/**
+ * The catalog the dashboard reports on — read through the active provider, so
+ * a production dashboard describes production's catalog instead of the sample
+ * seed. An unusable provider yields no products at all (every count reads 0)
+ * rather than falling back to demo rows: `provider.usable` and its `reason`
+ * are already on this payload and say why.
+ */
+async function loadCatalog(): Promise<Product[]> {
+  try {
+    return await getActiveProvider().listProducts();
+  } catch (error) {
+    console.error(
+      "Admin stats could not read the active catalog:",
+      error instanceof Error ? error.message : error,
+    );
+    return [];
+  }
+}
+
 export async function loadAdminStats(): Promise<AdminStats> {
-  const [observationRows, alertRows, clickRows, viewRows] = await Promise.all([
+  const [catalog, observationRows, alertRows, clickRows, viewRows] = await Promise.all([
+    loadCatalog(),
     query<ObservationRow>(
       "SELECT COUNT(*)::int AS total, MAX(observed_at) AS latest FROM price_observations",
     ),
@@ -172,9 +193,9 @@ export async function loadAdminStats(): Promise<AdminStats> {
   return {
     provider: providerStatus(),
     providers: providerList(),
-    catalog: catalogCounts(),
-    freshness: freshnessCounts(),
-    anomalies: anomalyCount(),
+    catalog: catalogCounts(catalog),
+    freshness: freshnessCounts(catalog),
+    anomalies: anomalyCount(catalog),
     observations: {
       total: observations.total,
       latest: toIso(observations.latest),

@@ -176,6 +176,191 @@ console.log("\nMarketplace link paste");
   check("unrecognisable slug is refused", r.result.status === "no_match", `${r.result.status} · ${r.note}`);
 }
 
+console.log("\nVariant identity (backend fix pass, FIX 3)");
+{
+  const r = matchProduct({ title: "Apple iPhone 16 128GB" }, [iphone256]);
+  check(
+    "a 128GB listing never lands on a 256GB product",
+    r.status === "no_match",
+    `${r.status} · ${r.reason}`,
+  );
+}
+{
+  const iphonePro = product("10", "iphone-16-pro-128gb", "iPhone 16 Pro 128GB", "Apple");
+  const r = matchProduct({ title: "Apple iPhone 16 Pro 128GB" }, [iphone128]);
+  check(
+    "a Pro listing never lands on the base model",
+    r.status === "no_match",
+    `${r.status} · ${r.reason}`,
+  );
+  const reverse = matchProduct({ title: "Apple iPhone 16 128GB" }, [iphonePro]);
+  check(
+    "a base listing never lands on the Pro model",
+    reverse.status === "no_match",
+    `${reverse.status} · ${reverse.reason}`,
+  );
+}
+{
+  const rtx5060 = product("11", "rtx-5060-8gb", "RTX 5060 8GB", "Nvidia");
+  const rtx5060ti = product("12", "rtx-5060-ti-16gb", "RTX 5060 Ti 16GB", "Nvidia");
+  const ti = matchProduct({ title: "Nvidia RTX 5060 Ti 16GB" }, [rtx5060]);
+  check(
+    "a Ti listing never lands on the non-Ti card",
+    ti.status === "no_match",
+    `${ti.status} · ${ti.reason}`,
+  );
+  const plain = matchProduct({ title: "Nvidia RTX 5060 8GB" }, [rtx5060ti]);
+  check(
+    "a non-Ti listing never lands on the Ti card",
+    plain.status === "no_match",
+    `${plain.status} · ${plain.reason}`,
+  );
+  check(
+    "the matching card still matches",
+    matchProduct({ title: "Nvidia RTX 5060 Ti 16GB" }, [rtx5060ti]).status === "match",
+  );
+}
+{
+  const r = matchProduct({ title: "Apple iPhone 16 128GB + Case Bundle" }, catalog);
+  check(
+    "a bundle listing never satisfies a standalone product",
+    r.status === "no_match",
+    `${r.status} · ${r.reason}`,
+  );
+  const second = matchProduct({ title: "Apple iPhone 16 128GB Bundle" }, catalog);
+  check(
+    "a bundle word alone is enough to refuse",
+    second.status === "no_match",
+    `${second.status} · ${second.reason}`,
+  );
+  const accessory = matchProduct({ title: "Apple iPhone 16 128GB + Charger" }, catalog);
+  check(
+    "a plus-accessory title is a bundle too",
+    accessory.status === "no_match",
+    `${accessory.status} · ${accessory.reason}`,
+  );
+  const specPlus = matchProduct({ title: "Apple iPhone 16 128GB + Free Shipping" }, catalog);
+  check(
+    "a seller's plus-padded title is not mistaken for a bundle",
+    specPlus.status === "match" && specPlus.product.slug === "iphone-16-128gb",
+    `${specPlus.status} · ${specPlus.reason}`,
+  );
+}
+{
+  const standalone = product("13", "airpods", "AirPods Pro 2nd Gen", "Apple");
+  const bundled = product("14", "airpods-bundle", "AirPods Pro 2nd Gen Bundle", "Apple");
+  const r = matchProduct({ title: "Apple AirPods Pro Gen 2" }, [bundled]);
+  check(
+    "a standalone listing never lands on a bundle product",
+    r.status === "no_match",
+    `${r.status} · ${r.reason}`,
+  );
+  const both = matchProduct({ title: "Apple AirPods Pro Gen 2 Bundle" }, [bundled]);
+  check(
+    "the same bundle still matches itself",
+    both.status === "match",
+    `${both.status} · ${both.reason}`,
+  );
+  check(
+    "the standalone product is unaffected",
+    matchProduct({ title: "Apple AirPods Pro Gen 2" }, [standalone]).status === "match",
+  );
+}
+{
+  const barcoded = { ...product("15", "galaxy-s25-256", "Galaxy S25 256GB", "Samsung"), gtin: "8806095499999" };
+  const modeled = { ...product("16", "galaxy-a55-128", "Galaxy A55 128GB", "Samsung"), modelNumber: "SM-A556E" };
+  const byGtin = matchProduct(
+    { title: "some padded seller title nobody can read", gtin: "8806095499999" },
+    [barcoded, modeled],
+  );
+  check(
+    "a GTIN wins before any title is read",
+    byGtin.status === "match" && byGtin.product.slug === "galaxy-s25-256",
+    `${byGtin.status} · ${byGtin.reason}`,
+  );
+  const byModel = matchProduct(
+    { title: "Samsung factory sealed unit", modelNumber: "sm-a556e" },
+    [barcoded, modeled],
+  );
+  check(
+    "a manufacturer model number wins next",
+    byModel.status === "match" && byModel.product.slug === "galaxy-a55-128",
+    `${byModel.status} · ${byModel.reason}`,
+  );
+  const unknown = matchProduct(
+    { title: "Totally generic words", gtin: "0000000000000" },
+    [barcoded, modeled],
+  );
+  check(
+    "an identifier we have never recorded falls back to the title path",
+    unknown.status === "no_match",
+    `${unknown.status} · ${unknown.reason}`,
+  );
+}
+
+console.log("\nSize and condition (backend fix pass, FIX 3)");
+{
+  const size8 = product("17", "pegasus-40-size-8", "Air Zoom Pegasus 40 Size 8", "Nike");
+  const size10 = product("18", "pegasus-40-size-10", "Air Zoom Pegasus 40 Size 10", "Nike");
+
+  const explicit = matchProduct({ title: "Nike Air Zoom Pegasus 40 Size 10" }, [size8, size10]);
+  check(
+    "a stated size picks that size, even when both share a model number",
+    explicit.status === "match" && explicit.product.slug === "pegasus-40-size-10",
+    `${explicit.status} · ${explicit.reason}`,
+  );
+
+  const omitted = matchProduct({ title: "Nike Air Zoom Pegasus 40" }, [size8, size10]);
+  check(
+    "a listing that omits the size is ambiguous, not attached to one",
+    omitted.status === "ambiguous",
+    `${omitted.status} · ${omitted.reason}`,
+  );
+
+  const single = matchProduct({ title: "Nike Air Zoom Pegasus 40 Size 8" }, [size8]);
+  check(
+    "a listing that names the only size we carry matches it",
+    single.status === "match",
+    `${single.status} · ${single.reason}`,
+  );
+
+  const tee8 = product("19", "classic-tee-m", "Classic Tee Size M", "Uniqlo");
+  const teeL = product("20", "classic-tee-l", "Classic Tee Size L", "Uniqlo");
+  const letter = matchProduct({ title: "Uniqlo Classic Tee Size L" }, [tee8, teeL]);
+  check(
+    "letter sizes are compared against letter sizes",
+    letter.status === "match" && letter.product.slug === "classic-tee-l",
+    `${letter.status} · ${letter.reason}`,
+  );
+}
+{
+  const newOne = product("21", "iphone-16-128-new", "iPhone 16 128GB", "Apple");
+  const refurb = product("22", "iphone-16-128-refurb", "iPhone 16 128GB Refurbished", "Apple");
+
+  const used = matchProduct({ title: "Apple iPhone 16 128GB Used — good condition" }, [newOne]);
+  check(
+    "a used listing never lands on a new product",
+    used.status === "no_match",
+    `${used.status} · ${used.reason}`,
+  );
+  const plain = matchProduct({ title: "Apple iPhone 16 128GB" }, [refurb]);
+  check(
+    "a plain listing never lands on a refurbished product",
+    plain.status === "no_match",
+    `${plain.status} · ${plain.reason}`,
+  );
+  const refurbishedListing = matchProduct({ title: "Apple iPhone 16 128GB Refurbished" }, [refurb]);
+  check(
+    "the refurbished listing matches the refurbished product",
+    refurbishedListing.status === "match",
+    `${refurbishedListing.status} · ${refurbishedListing.reason}`,
+  );
+  check(
+    "an untouched condition still matches the new product",
+    matchProduct({ title: "Apple iPhone 16 128GB Brand New Sealed" }, [newOne]).status === "match",
+  );
+}
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 if (failed.length > 0) {

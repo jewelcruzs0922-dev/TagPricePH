@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Product, StoreOffer } from "@/lib/types";
 import { getStore } from "@/lib/data/stores";
 import { getAffiliateUrl } from "@/lib/api/affiliate";
+import { isEligibleCurrentOffer } from "@/lib/pricing";
 import { formatDiff, formatPeso } from "@/lib/utils/format";
 import { formatRelativeTime, getFreshness } from "@/lib/utils/freshness";
 import { StoreLogo } from "@/components/ui/StoreLogo";
@@ -20,12 +21,14 @@ const CONDITION_LABELS: Record<NonNullable<StoreOffer["condition"]>, string> = {
 /**
  * Whether an offer may claim this product's lowest price.
  *
- * An out-of-stock listing cannot be bought, and a listing a provider reports
- * as a different variant is a different product — neither may be crowned the
- * lowest price of this one.
+ * Delegated to the one eligibility funnel in lib/pricing rather than
+ * re-stated here: a listing that is out of stock, a different variant or a
+ * bundle, stale past the freshness window, or pointing somewhere we cannot
+ * safely send a shopper cannot be crowned the lowest current price — and this
+ * table must agree with the hero, the cards, and the search sort about that.
  */
 function canRank(offer: StoreOffer): boolean {
-  return offer.inStock && offer.condition !== "different_variant";
+  return isEligibleCurrentOffer(offer);
 }
 
 export function StoreComparison({
@@ -42,7 +45,7 @@ export function StoreComparison({
     return (
       <ul className="flex flex-col gap-3">
         {sorted.map((offer, index) => (
-          <li key={offer.storeId}>
+          <li key={`${offer.storeId}:${offer.listingId ?? offer.url}`}>
             <StoreOfferRow
               offer={offer}
               bestPrice={bestPrice}
@@ -61,7 +64,7 @@ export function StoreComparison({
       <div className="sm:hidden">
         <ul className="flex flex-col gap-3">
           {sorted.map((offer, index) => (
-            <li key={offer.storeId}>
+            <li key={`${offer.storeId}:${offer.listingId ?? offer.url}`}>
               <StoreOfferRow
                 offer={offer}
                 bestPrice={bestPrice}
@@ -87,16 +90,19 @@ export function StoreComparison({
           </caption>
           <thead>
             <tr className="border-b border-line bg-cream/70 text-[13px] font-semibold uppercase tracking-wide text-ink-3">
-              <th scope="col" className="px-4 py-3">
+              <th scope="col" className="px-3 py-3">
                 Store
               </th>
-              <th scope="col" className="px-4 py-3 text-right">
+              <th scope="col" className="px-3 py-3 text-right">
                 Price
               </th>
-              <th scope="col" className="px-4 py-3 text-right">
+              {/* Centered so the header sits on the same axis as the pill
+                  values below it — right-aligning text against padded pills
+                  reads as a misalignment even when the boxes match. */}
+              <th scope="col" className="px-3 py-3 text-center">
                 Difference
               </th>
-              <th scope="col" className="px-4 py-3 text-right">
+              <th scope="col" className="px-3 py-3 text-right">
                 <span className="sr-only">Action</span>
               </th>
             </tr>
@@ -104,23 +110,23 @@ export function StoreComparison({
           <tbody>
             {sorted.map((offer, index) => (
               <tr
-                key={offer.storeId}
+                key={`${offer.storeId}:${offer.listingId ?? offer.url}`}
                 className="border-b border-line/80 last:border-b-0"
               >
-                <td className="px-4 py-3.5">
+                <td className="px-3 py-3.5">
                   <StoreOfferIdentity offer={offer} isBest={index === 0 && canRank(offer)} />
                 </td>
-                <td className="px-4 py-3.5 text-right text-[16px] font-bold text-ink">
+                <td className="px-3 py-3.5 text-right text-[16px] font-bold text-ink">
                   {formatPeso(offer.price)}
                 </td>
-                <td className="px-4 py-3.5 text-right">
+                <td className="px-3 py-3.5 text-center">
                   {canRank(offer) ? (
                     <DifferenceChip diff={offer.price - bestPrice} />
                   ) : (
                     <span className="text-[13px] text-ink-3">—</span>
                   )}
                 </td>
-                <td className="px-4 py-3.5 text-right">
+                <td className="px-3 py-3.5 text-right">
                   <DealLink product={product} offer={offer} compact />
                 </td>
               </tr>
@@ -165,13 +171,13 @@ function StoreOfferIdentity({
 }) {
   const store = getStore(offer.storeId);
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2">
       <StoreLogo storeId={offer.storeId} />
       <div>
         <p className="text-[15px] font-semibold text-ink">{store.name}</p>
         <div className="flex flex-wrap items-center gap-2">
           {isBest && (
-            <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-ink">
+            <span className="whitespace-nowrap rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-ink">
               Lowest listed price
             </span>
           )}
@@ -192,20 +198,18 @@ function StoreOfferIdentity({
   );
 }
 
-function DifferenceChip({ diff, inline = false }: { diff: number; inline?: boolean }) {
+/**
+ * The difference column. The best row already carries the "Lowest listed
+ * price" badge under its store name — repeating it here as a wide pill is
+ * what made the column wrap — so the baseline just shows an em dash, the
+ * same convention the homepage list uses.
+ */
+function DifferenceChip({ diff }: { diff: number; inline?: boolean }) {
   if (diff <= 0) {
-    return (
-      <span className="inline-flex rounded-full bg-accent px-2.5 py-1 text-[12px] font-bold text-ink">
-        Lowest listed price
-      </span>
-    );
+    return <span className="text-[13px] text-ink-3">—</span>;
   }
   return (
-    <span
-      className={`inline-flex rounded-full bg-cream border border-line px-2.5 py-1 text-[13px] font-semibold text-ink-2 ${
-        inline ? "" : ""
-      }`}
-    >
+    <span className="inline-flex whitespace-nowrap rounded-full border border-line bg-cream px-2.5 py-1 text-[13px] font-semibold text-ink-2">
       {formatDiff(diff)}
     </span>
   );
@@ -228,7 +232,7 @@ function DealLink({
   if (!offer.inStock) {
     return (
       <span
-        className={`inline-flex items-center justify-center rounded-full font-semibold text-ink-3 ${
+        className={`inline-flex items-center justify-center whitespace-nowrap rounded-full font-semibold text-ink-3 ${
           compact
             ? "border border-line bg-cream px-3.5 py-2 text-[13px]"
             : "btn-primary w-full opacity-60"
@@ -242,9 +246,9 @@ function DealLink({
   return (
     <Link
       href={href}
-      className={`inline-flex min-h-11 items-center justify-center rounded-full font-semibold transition ${
+      className={`inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-full font-semibold transition ${
         compact
-          ? "border border-line bg-white px-5 py-2 text-[13px] text-ink hover:border-ink"
+          ? "border border-line bg-white px-4 py-2 text-[13px] text-ink hover:border-ink"
           : "btn-primary w-full"
       }`}
       rel="nofollow sponsored noopener"
@@ -294,7 +298,7 @@ function StoreOfferRow({
           <div className="flex items-center gap-2">
             <p className="truncate text-[15px] font-semibold text-ink">{store.name}</p>
             {isBest && (
-              <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold uppercase">
+              <span className="shrink-0 whitespace-nowrap rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold uppercase">
                 Lowest listed price
               </span>
             )}

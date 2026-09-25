@@ -10,7 +10,12 @@ const ranges: Range[] = ["7D", "30D", "3M", "6M"];
 
 type PriceHistoryChartProps = {
   history: PricePoint[];
-  currentPrice: number;
+  /**
+   * Today's price, or null when no offer currently qualifies as one (every
+   * listing stale, out of stock, or not this variant). Null must not be
+   * rendered as ₱0 — that would be a price nobody is charging.
+   */
+  currentPrice?: number | null;
   timing?: BuyTiming;
   showSummary?: boolean;
   compact?: boolean;
@@ -46,8 +51,12 @@ export function PriceHistoryChart({
   const points = useMemo(() => filterHistory(history, range), [history, range]);
 
   const prices = points.map((point) => point.price);
-  const min = Math.min(...prices, currentPrice);
-  const max = Math.max(...prices, currentPrice);
+  const current = currentPrice ?? null;
+  // The scale only includes today's price when there is one, so an unknown
+  // current price cannot drag the axis down to zero.
+  const scale = current === null ? prices : [...prices, current];
+  const min = Math.min(...scale);
+  const max = Math.max(...scale);
   const average = getAverage(points);
   const lowest = Math.min(...prices);
   const highest = Math.max(...prices);
@@ -137,7 +146,11 @@ export function PriceHistoryChart({
           viewBox={`0 0 ${width} ${height}`}
           className="h-[200px] w-full"
           role="img"
-          aria-label={`Price chart from ${formatPeso(lowest)} to ${formatPeso(currentPrice)} over ${range}`}
+          aria-label={
+            current === null
+              ? `Price chart from ${formatPeso(lowest)} to ${formatPeso(highest)} over ${range}`
+              : `Price chart from ${formatPeso(lowest)} to ${formatPeso(current)} over ${range}`
+          }
         >
           {ticks.map((tick) => {
             const y =
@@ -207,9 +220,11 @@ export function PriceHistoryChart({
               top: `${Math.max((last.y / height) * 100 - 18, 0)}%`,
             }}
           >
-            <p className="text-[11px] font-semibold text-ink-3">Today</p>
+            <p className="text-[11px] font-semibold text-ink-3">
+              {current !== null ? "Today" : "Last recorded"}
+            </p>
             <p className="text-[13px] font-extrabold leading-tight text-ink">
-              {formatPeso(currentPrice)}
+              {formatPeso(current ?? last.price)}
             </p>
           </div>
         )}
@@ -217,7 +232,11 @@ export function PriceHistoryChart({
 
       {showSummary && (
         <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Stat label="Current" value={formatPeso(currentPrice)} strong />
+          <Stat
+            label="Current"
+            value={current !== null ? formatPeso(current) : "Unavailable"}
+            strong
+          />
           <Stat label="Lowest" value={formatPeso(lowest)} />
           <Stat label="Average" value={formatPeso(average)} />
           <Stat label="Highest" value={formatPeso(highest)} />

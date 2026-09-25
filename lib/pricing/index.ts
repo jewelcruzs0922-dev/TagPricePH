@@ -1,5 +1,7 @@
 import type { PricePoint, Product, StoreOffer, BuyTiming } from "@/lib/types";
 import { getDataSource, getPriceSeries, type PriceSeries } from "@/lib/data/observations";
+import { isSafeRedirectUrl } from "@/lib/api/affiliate";
+import { getFreshness, isCurrentFreshness } from "@/lib/utils/freshness";
 import { formatPeso } from "@/lib/utils/format";
 
 export type HistoryRange = "7D" | "30D" | "3M" | "6M";
@@ -11,9 +13,71 @@ const RANGE_DAYS: Record<HistoryRange, number> = {
   "6M": 180,
 };
 
+/**
+ * Why one offer may not claim this product's current price. Every state is a
+ * statement about the data, never about how good the deal looks.
+ */
+export type OfferExclusion =
+  | "invalid_url"
+  | "invalid_price"
+  | "different_variant"
+  | "bundle"
+  | "out_of_stock"
+  | "stale";
+
+/**
+ * The single authority on "is this a valid current offer" — the funnel every
+ * claim about a lowest price goes through, defined once so no API route,
+ * component, or sort can re-implement it and drift.
+ *
+ *   all offers
+ *      → valid URL          (we can only send a shopper somewhere safe)
+ *      → valid price        (a price of 0 or NaN is not a price)
+ *      → right product      (a bundle or another variant is not this product)
+ *      → available          (an out-of-stock listing cannot be bought now)
+ *      → fresh enough       (checked inside the freshness window)
+ *      → eligible
+ *
+ * Returns null when the offer passes, or the reason it does not — callers
+ * that only need the boolean use `isEligibleCurrentOffer`.
+ */
+export function checkOfferEligible(
+  offer: StoreOffer,
+  now: number = Date.now(),
+): OfferExclusion | null {
+  if (!offer.url || !isSafeRedirectUrl(offer.url)) return "invalid_url";
+  if (!Number.isFinite(offer.price) || offer.price <= 0) return "invalid_price";
+  if (offer.condition === "different_variant") return "different_variant";
+  if (offer.condition === "bundle") return "bundle";
+  if (!offer.inStock) return "out_of_stock";
+  if (!isCurrentFreshness(getFreshness(offer.updatedAt, now))) return "stale";
+  return null;
+}
+
+export function isEligibleCurrentOffer(offer: StoreOffer, now: number = Date.now()): boolean {
+  return checkOfferEligible(offer, now) === null;
+}
+
+/**
+ * The offers a "lowest price right now" may be computed from.
+ *
+ * A stale offer may still be listed — as history, clearly labelled — but it
+ * must not win the ranking merely by being cheaper than a price checked this
+ * morning. When nothing survives the funnel the product has no current lowest
+ * price, and callers must say so rather than fall back to the cheapest stale
+ * number they can find.
+ */
+export function getEligibleCurrentOffers(
+  offers: StoreOffer[],
+  now: number = Date.now(),
+): StoreOffer[] {
+  return offers.filter((offer) => isEligibleCurrentOffer(offer, now));
+}
+
 export function getLowestOffer(offers: StoreOffer[]): StoreOffer | null {
-  if (offers.length === 0) return null;
-  return offers.reduce((best, offer) => (offer.price < best.price ? offer : best));
+  const eligible = getEligibleCurrentOffers(offers);
+  if (eligible.length === 0) return null;
+  return eligible.reduce((best, offer) => (offer.price < best.price ? offer : best));
 }
 
 export function getHighestPrice(offers: StoreOffer[]): number {
@@ -21,10 +85,16 @@ export function getHighestPrice(offers: StoreOffer[]): number {
   return Math.max(...offers.map((offer) => offer.price));
 }
 
+/**
+ * Savings compare like with like: the best eligible price against the worst
+ * one a shopper could actually buy today. Against an out-of-stock or stale
+ * listing the "you could save" figure would promise a comparison that does
+ * not exist.
+ */
 export function getSavings(offers: StoreOffer[]): number {
-  const lowest = getLowestOffer(offers);
-  if (!lowest) return 0;
-  return getHighestPrice(offers) - lowest.price;
+  const eligible = getEligibleCurrentOffers(offers);
+  if (eligible.length < 2) return 0;
+  return getHighestPrice(eligible) - getLowestOffer(eligible)!.price;
 }
 
 export function getAverage(history: PricePoint[]): number {
@@ -128,6 +198,21 @@ export function evaluateBuyTiming(product: Product, history?: PricePoint[]): Buy
   const current = lowest?.price ?? 0;
   const points = history ?? getPriceSeries(product).points;
 
+  // No eligible offer means there is no current price to judge. A verdict
+  // computed against 0 would read "100% below average" — the most flattering
+  // possible lie — so the engine declines instead.
+  if (!lowest) {
+    return {
+      status: "fair",
+      label: "Current price unavailable",
+      detail:
+        "None of this product's listings has a fresh, in-stock price we can " +
+        "confirm right now, so there is nothing to compare with its history.",
+      percentVsAverage: 0,
+      insufficient: true,
+    };
+  }
+
   if (points.length < MIN_TIMING_OBSERVATIONS) {
     return {
       status: "fair",
@@ -191,10 +276,16 @@ export function getPriceDropPercent(product: Product): number | null {
 }
 
 export type RecordedDrop = {
-  /** How far the current price sits below the previous recorded reading, in pesos. */
-  amount: number;
-  /** Percentage below that reading. */
-  percent: number;
+  /** The reading the price fell from, as recorded. */
+  previousPrice: number;
+  /** The price being compared against it. */
+  currentPrice: number;
+  /** How far it fell, in pesos. */
+  absoluteDrop: number;
+  /** How far it fell, in percent of the previous reading. */
+  percentageDrop: number;
+  /** The date of that previous reading, "YYYY-MM-DD". */
+  observedAt: string;
   /** "Down ₱2,000 vs previous recorded price" */
   detail: string;
   /** "Down 8% from 30-day average" — null unless enough readings exist to claim it. */
@@ -203,7 +294,7 @@ export type RecordedDrop = {
 
 /**
  * A price drop derived from recorded observations — never from a listed
- * "previous" price.
+ * "previous" price. This is the only place a drop may be claimed from.
  *
  * Returns null in every case where the data cannot support the claim:
  *  - the series is not entirely live (one generated reading would make the
@@ -228,11 +319,11 @@ export function getRecordedPriceDrop(
   const previous = points[points.length - 2];
   if (!newest || !previous) return null;
 
-  const baseline = newest.price === currentPrice ? previous.price : newest.price;
-  if (baseline <= currentPrice) return null;
+  const baseline = newest.price === currentPrice ? previous : newest;
+  if (baseline.price <= currentPrice) return null;
 
-  const amount = baseline - currentPrice;
-  const percent = Math.round((amount / baseline) * 100);
+  const absoluteDrop = baseline.price - currentPrice;
+  const percentageDrop = Math.round((absoluteDrop / baseline.price) * 100);
 
   const stats = getWindowStats(points, currentPrice, "30D");
   const averageDetail =
@@ -241,9 +332,12 @@ export function getRecordedPriceDrop(
       : null;
 
   return {
-    amount,
-    percent,
-    detail: `Down ${formatPeso(amount)} vs previous recorded price`,
+    previousPrice: baseline.price,
+    currentPrice,
+    absoluteDrop,
+    percentageDrop,
+    observedAt: baseline.date,
+    detail: `Down ${formatPeso(absoluteDrop)} vs previous recorded price`,
     averageDetail,
   };
 }

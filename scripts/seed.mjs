@@ -101,9 +101,6 @@ try {
   for (const chunk of chunkRows(listingRows)) {
     await client.query(upsertListingsSql(chunk.length), flatten(chunk, (row) => row));
   }
-  for (const chunk of chunkRows(listingRows)) {
-    await client.query(upsertListingsSql(chunk.length), flatten(chunk, (row) => row));
-  }
 
   const pairParams = flatten(listingRows, (row) => [row[0], row[1]]);
   const listingIdByKey = new Map();

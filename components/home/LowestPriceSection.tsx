@@ -5,6 +5,7 @@ import {
   evaluateBuyTiming,
   getLowestOffer,
   getSavings,
+  isEligibleCurrentOffer,
 } from "@/lib/pricing";
 import { formatCount, formatPeso } from "@/lib/utils/format";
 import { getStore } from "@/lib/data/stores";
@@ -85,8 +86,14 @@ export async function LowestPriceSection({ product }: { product: Product }) {
   // page can never disagree about what this product's history says.
   const series = await resolvePriceSeries(product);
   const timing = evaluateBuyTiming(product, series.points);
-  const sorted = [...product.offers].sort((a, b) => a.price - b.price);
-  const bestPrice = sorted[0]?.price ?? 0;
+  const sorted = [...product.offers].sort(
+    (a, b) =>
+      Number(isEligibleCurrentOffer(b)) - Number(isEligibleCurrentOffer(a)) ||
+      a.price - b.price,
+  );
+  // The badge and the hero price must come from the same funnel, or this
+  // list could crown an offer the headline refuses to call current.
+  const bestPrice = getLowestOffer(product.offers)?.price ?? null;
   const sample = isSampleClaim(product);
   const tone = timingTone[timing.status];
   const TimingIcon = tone.Icon;
@@ -189,30 +196,39 @@ export async function LowestPriceSection({ product }: { product: Product }) {
               </h3>
               <ul className="overflow-hidden rounded-xl border border-line">
                 {sorted.map((offer, index) => {
-                  const isBest = index === 0;
-                  const diff = offer.price - bestPrice;
+                  const rankable = isEligibleCurrentOffer(offer);
+                  const isBest = index === 0 && rankable && bestPrice !== null;
+                  const diff = rankable && bestPrice !== null ? offer.price - bestPrice : 0;
                   const store = getStore(offer.storeId);
                   return (
                     <li
-                      key={offer.storeId}
+                      key={`${offer.storeId}:${offer.listingId ?? offer.url}`}
                       className="flex items-center gap-2 border-b border-line bg-white px-3.5 py-3 last:border-b-0"
                     >
                       <StoreLogo storeId={offer.storeId} size={32} />
-                      <span className="min-w-0 flex-1 text-[14px] font-semibold text-ink">
-                        {store.name}
-                      </span>
-                      {isBest ? (
-                        <span className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-[11px] font-bold text-ink">
-                          Lowest listed price
+                      {/* Name and badge stack instead of sharing one line:
+                          inline, the badge squeezed "TikTok Shop" into a
+                          wrap that broke the row. */}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-semibold text-ink">
+                          {store.name}
                         </span>
-                      ) : (
-                        <span className="hidden sm:inline" />
-                      )}
+                        {isBest && (
+                          <span className="mt-1 inline-flex w-fit items-center rounded-md bg-accent px-2 py-0.5 text-[11px] font-bold text-ink">
+                            Lowest listed price
+                          </span>
+                        )}
+                        {!rankable && (
+                          <span className="mt-1 inline-flex w-fit items-center rounded-md border border-line bg-cream px-2 py-0.5 text-[11px] font-bold text-ink-3">
+                            {offer.inStock ? "Not current" : "Out of stock"}
+                          </span>
+                        )}
+                      </span>
                       <span className="shrink-0 text-[15px] font-extrabold text-ink">
                         {formatPeso(offer.price)}
                       </span>
                       <span className="hidden w-16 shrink-0 text-right text-[13px] font-semibold text-ink-2 sm:block">
-                        {isBest ? "—" : `+${formatPeso(diff)}`}
+                        {isBest || diff <= 0 ? "—" : `+${formatPeso(diff)}`}
                       </span>
                     </li>
                   );
@@ -233,7 +249,7 @@ export async function LowestPriceSection({ product }: { product: Product }) {
           <div className="flex flex-col gap-4 md:col-span-2 lg:col-span-1">
             <PriceHistoryChart
               history={series.points}
-              currentPrice={lowest?.price ?? 0}
+              currentPrice={lowest?.price ?? null}
               timing={timing}
               source={series.source}
               compact

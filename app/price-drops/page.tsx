@@ -1,14 +1,8 @@
 import type { Metadata } from "next";
-import { priceDrops, products } from "@/lib/data/products";
-import type { Product } from "@/lib/types";
-import {
-  getLowestOffer,
-  getPriceDropPercent,
-  getRecordedPriceDrop,
-  type RecordedDrop,
-} from "@/lib/pricing";
-import { resolvePriceSeriesFor } from "@/lib/db/observations";
+import { listCatalog } from "@/lib/data/catalog";
+import { buildPriceDropFeed } from "@/lib/data/price-drops";
 import { PriceDropCard } from "@/components/products/PriceDropCard";
+import { EmptyState } from "@/components/ui/States";
 
 export const metadata: Metadata = {
   title: "Price Drops Today",
@@ -18,35 +12,12 @@ export const metadata: Metadata = {
 };
 
 export default async function PriceDropsPage() {
-  // A drop is only reported from recorded readings when there are any. With an
-  // empty observation store every row below falls back to the sample reference
-  // price, and the copy says so.
-  const seriesBySlug = await resolvePriceSeriesFor(products);
-
-  const recorded: { product: Product; drop: RecordedDrop }[] = [];
-  for (const product of products) {
-    const series = seriesBySlug.get(product.slug);
-    const lowest = getLowestOffer(product.offers);
-    if (!series || !lowest) continue;
-    const drop = getRecordedPriceDrop(series, lowest.price);
-    if (drop) recorded.push({ product, drop });
-  }
-  recorded.sort((a, b) => b.drop.percent - a.drop.percent);
-
-  const hasRecorded = recorded.length > 0;
-
-  const sample = products
-    .map((product) => ({ product, drop: getPriceDropPercent(product) ?? 0 }))
-    .filter((item) => item.drop > 0)
-    .sort((a, b) => b.drop - a.drop);
-
-  const feed: Product[] = hasRecorded
-    ? recorded.map((item) => item.product)
-    : sample.length > 0
-      ? sample.map((item) => item.product)
-      : priceDrops;
-
-  const recordedBySlug = new Map(recorded.map((item) => [item.product.slug, item.drop]));
+  // One feed definition for this page and the homepage (lib/data/price-drops):
+  // verified drops from recorded observations first, the sample catalog's
+  // reference price only while the catalog itself is sample, and nothing when
+  // neither supports a claim.
+  const feed = await buildPriceDropFeed(await listCatalog());
+  const hasRecorded = feed.hasRecorded;
 
   return (
     <div className="container-page py-8 sm:py-10">
@@ -64,15 +35,24 @@ export default async function PriceDropsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-        {feed.map((product) => (
-          <PriceDropCard
-            key={product.id}
-            product={product}
-            recorded={recordedBySlug.get(product.slug)}
-          />
-        ))}
-      </div>
+      {feed.products.length === 0 ? (
+        <EmptyState
+          title="No price drops right now."
+          supporting="A drop is only shown when an actual observation is lower than the one before it. Nothing in the catalog qualifies yet."
+          actionLabel="Browse categories"
+          actionHref="/categories"
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          {feed.products.map((product) => (
+            <PriceDropCard
+              key={product.id}
+              product={product}
+              recorded={feed.recorded.get(product.slug)}
+            />
+          ))}
+        </div>
+      )}
 
       <div className="card mt-8 p-5">
         <h2 className="text-[17px] font-bold text-ink">How drop percentages work</h2>

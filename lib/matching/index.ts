@@ -20,7 +20,11 @@ export const AMBIGUITY_MARGIN = 0.06;
 export type MatchInput = {
   title: string;
   brand?: string;
+  /** Manufacturer part number / model code, when the source gives us one. */
+  modelNumber?: string;
   sku?: string;
+  /** GTIN/EAN/UPC — the strongest identity a product has. */
+  gtin?: string;
 };
 
 export type MatchResult =
@@ -71,8 +75,83 @@ const COLOR_TOKENS = new Set([
   "bronze", "rose", "sky", "cyan", "magenta",
 ]);
 
+/**
+ * Model-discriminating tokens: the words that turn one model into another.
+ *
+ * Their rule is symmetric — a token present on exactly one side means the two
+ * sides are talking about different products, which is what stops
+ * "iPhone 16 Pro" from landing on "iPhone 16" and "RTX 5060 Ti" from landing
+ * on "RTX 5060". Generation tokens (`gen2`, `3rd gen` after tokenisation) are
+ * included for the same reason.
+ */
+const MODEL_TRIM_TOKENS = new Set([
+  "pro", "max", "plus", "ultra", "mini", "se", "fe", "ti", "lite", "air",
+  "note", "edition", "base", "art", "prime",
+]);
+
+const GENERATION_TOKEN = /^gen\d+$/;
+
+/**
+ * Words that only ever appear on a bundled listing. A bundle is a different
+ * purchasable from the standalone product, so "iPhone 16 128GB + Case Bundle"
+ * must never satisfy a query for "iPhone 16 128GB".
+ */
+const BUNDLE_TOKENS = new Set(["bundle", "combo", "kit", "pack"]);
+
+/**
+ * "+ <accessory>": the second shape a bundle title takes — "+ Case",
+ * "+ Charger", "+ PSU". Deliberately an accessory list rather than any "+"
+ * at all: marketplace titles are full of specification pluses
+ * ("Bluetooth + USB-C", "10% + Zinc", "5000mAh + 70W charging") that say
+ * nothing about bundling, and refusing those would throw away good matches.
+ */
+const BUNDLE_PLUS =
+  /\+\s*(bundle|case|cover|charger|adapter|earphones?|earbuds|headset|stylus|pencil|psu|cables?|screen|protector|tempered|pouch|bag|stand|holder|mount|freebie|gift|insurance)\b/i;
+
+/**
+ * Whether a raw listing/product title describes a bundle rather than the
+ * standalone item.
+ *
+ * Applied to both sides: a product that genuinely *is* a bundle still matches
+ * a listing of the same bundle.
+ */
+export function isBundleTitle(raw: string): boolean {
+  const tokens = tokenize(raw.toLowerCase());
+  if (tokens.some((token) => BUNDLE_TOKENS.has(token))) return true;
+  return BUNDLE_PLUS.test(raw);
+}
+
+/**
+ * Whether a title states that the item is not new.
+ *
+ * A second-hand or refurbished unit at ₱15,000 sitting beside a new one at
+ * ₱45,000 would otherwise become this product's "lowest price" — a comparison
+ * of two different things. Read from the raw title, because tokenisation
+ * strips exactly the words ("new", "sealed") that mark the other side.
+ *
+ * One-sided knowledge is not enough to reject: only an explicit claim on one
+ * side and not the other is a conflict, so a title that simply says nothing
+ * about condition still matches.
+ */
+const USED_TITLE =
+  /\b(used|refurbished|refurb|pre[- ]?owned|preloved|second[- ]?hand|open[- ]?box|for parts|no box|display unit)\b/i;
+
+export function isUsedTitle(raw: string): boolean {
+  return USED_TITLE.test(raw);
+}
+
+/** Apparel letter sizes, compared only when both sides state one. */
+const LETTER_SIZES = new Set(["xxs", "xs", "s", "m", "l", "xl", "xxl", "3xl"]);
+
 type Variant = {
+  /** The first capacity stated, for readable refusal reasons. */
   storageGb?: number;
+  /** Every capacity stated (storage, RAM, VRAM) — compared as a set. */
+  capacities: number[];
+  /** Standalone numbers: model numbers, screen sizes, apparel sizes. */
+  numbers: number[];
+  /** Apparel letter sizes (s/m/l/…), kept apart from numeric sizes. */
+  letters: string[];
   color?: string;
 };
 
@@ -136,15 +215,40 @@ export function tokenize(input: string): string[] {
   return merged.filter((token) => !NOISE_TOKENS.has(token) && !STOP_TOKENS.has(token));
 }
 
-/** Storage capacity and colour, when the text states them confidently. */
+/**
+ * Storage capacity(s), standalone numbers, apparel sizes and colour, when the
+ * text states them confidently.
+ *
+ * Every capacity is collected, not just the first: "16GB RAM 512GB SSD" and
+ * "512GB SSD 16GB RAM" describe the same machine, and a matcher that read
+ * only the first number would refuse them.
+ *
+ * Standalone numbers are kept separately because they carry a different kind
+ * of identity — a model number, a screen diagonal, an apparel size. They are
+ * compared only when *both* sides state one, and by sharing at least one
+ * rather than by equality, so a listing that adds an unrelated figure
+ * ("…2023 model") still matches while "Size 8" and "Size 10" do not.
+ *
+ * Letter sizes are kept apart from numeric ones so a side that says "Size 10"
+ * and a side that says "Size L" are not compared against each other.
+ */
 export function extractVariant(tokens: string[]): Variant {
-  const variant: Variant = {};
+  const variant: Variant = { capacities: [], numbers: [], letters: [] };
 
   for (const token of tokens) {
-    const match = /^(\d+)(gb|tb)$/.exec(token);
-    if (match) {
-      variant.storageGb = Number(match[1]) * (match[2] === "tb" ? 1000 : 1);
-      break;
+    const capacity = /^(\d+)(gb|tb)$/.exec(token);
+    if (capacity) {
+      const value = Number(capacity[1]) * (capacity[2] === "tb" ? 1000 : 1);
+      variant.capacities.push(value);
+      if (variant.storageGb === undefined) variant.storageGb = value;
+      continue;
+    }
+    if (/^\d+$/.test(token)) {
+      variant.numbers.push(Number(token));
+      continue;
+    }
+    if (LETTER_SIZES.has(token)) {
+      variant.letters.push(token);
     }
   }
 
@@ -156,6 +260,40 @@ export function extractVariant(tokens: string[]): Variant {
   }
 
   return variant;
+}
+
+/** The model-discriminating tokens present in a token list. */
+export function extractModelTokens(tokens: string[]): Set<string> {
+  const model = new Set<string>();
+  for (const token of tokens) {
+    if (MODEL_TRIM_TOKENS.has(token) || GENERATION_TOKEN.test(token)) {
+      model.add(token);
+    }
+  }
+  return model;
+}
+
+/** True when the two sides disagree about a model-discriminating token. */
+function modelConflicts(a: Set<string>, b: Set<string>): boolean {
+  for (const token of a) if (!b.has(token)) return true;
+  for (const token of b) if (!a.has(token)) return true;
+  return false;
+}
+
+/**
+ * True when two sides genuinely disagree: each states at least one value the
+ * other does not.
+ *
+ * The asymmetry matters. A listing that omits the size ("Pegasus 40" against
+ * "Pegasus 40 Size 8") is *ambiguous*, not wrong, so it must survive to be
+ * scored; a listing that states a different one ("Size 10" against "Size 8")
+ * is wrong even when both share a model number. A side that states nothing,
+ * or states only what the other also states, is never a disagreement.
+ */
+function conflicts<T>(a: readonly T[], b: readonly T[]): boolean {
+  const onlyInA = a.some((value) => !b.includes(value));
+  const onlyInB = b.some((value) => !a.includes(value));
+  return onlyInA && onlyInB;
 }
 
 /** Identity tokens for a canonical product: brand + name only, never keywords. */
@@ -183,6 +321,84 @@ function scoreTokens(inputTokens: string[], candidateTokens: string[]): number {
 }
 
 /**
+ * Identifier priority, strongest first: GTIN/EAN/UPC, then the manufacturer's
+ * model number, then the SKU — the recommended order, and the signals a
+ * seller cannot pad.
+ *
+ * Each is a *positive* accelerator rather than a gate: a hit is decisive and
+ * returns immediately, while a miss falls through to the title path. Our
+ * catalog does not yet carry every product's barcode, so a listing whose
+ * identifier we have never recorded must still be allowed to match on its
+ * name — the absence of a barcode in our data is not evidence of a different
+ * product. A confident title match beside a *conflicting* identifier never
+ * happens: identifiers are checked before any fuzzy score is computed.
+ */
+function matchByIdentifier(input: MatchInput, candidates: Product[]): MatchResult | null {
+  const gtin = input.gtin?.trim().toLowerCase();
+  if (gtin) {
+    const hit = candidates.find((product) => product.gtin?.trim().toLowerCase() === gtin);
+    if (hit) {
+      return {
+        status: "match",
+        product: hit,
+        score: 1,
+        reason: `GTIN "${input.gtin}" matched exactly`,
+      };
+    }
+  }
+
+  const modelNumber = input.modelNumber?.trim().toLowerCase();
+  if (modelNumber) {
+    const hit = candidates.find(
+      (product) => product.modelNumber?.trim().toLowerCase() === modelNumber,
+    );
+    if (hit) {
+      return {
+        status: "match",
+        product: hit,
+        score: 1,
+        reason: `model number "${input.modelNumber}" matched exactly`,
+      };
+    }
+  }
+
+  const sku = input.sku?.trim().toLowerCase();
+  if (sku) {
+    const hit = candidates.find((product) => product.sku?.trim().toLowerCase() === sku);
+    if (hit) {
+      return {
+        status: "match",
+        product: hit,
+        score: 1,
+        reason: `SKU "${input.sku}" matched exactly`,
+      };
+    }
+  }
+
+  return null;
+}
+
+/** Bundle-ness of a canonical product, memoised across a candidate sweep. */
+const bundleCache = new WeakMap<Product, boolean>();
+function candidateIsBundle(product: Product): boolean {
+  const cached = bundleCache.get(product);
+  if (cached !== undefined) return cached;
+  const value = isBundleTitle(`${product.brand} ${product.name}`);
+  bundleCache.set(product, value);
+  return value;
+}
+
+/** Condition of a canonical product, memoised across a candidate sweep. */
+const usedCache = new WeakMap<Product, boolean>();
+function candidateIsUsed(product: Product): boolean {
+  const cached = usedCache.get(product);
+  if (cached !== undefined) return cached;
+  const value = isUsedTitle(`${product.brand} ${product.name}`);
+  usedCache.set(product, value);
+  return value;
+}
+
+/**
  * Finds the canonical product a listing refers to.
  *
  * @param input      the raw listing (title always required)
@@ -196,21 +412,8 @@ export function matchProduct(
   const threshold = options.threshold ?? MATCH_THRESHOLD;
   const margin = options.margin ?? AMBIGUITY_MARGIN;
 
-  // An explicit SKU is decisive — it is the one signal sellers cannot pad.
-  const sku = input.sku?.trim().toLowerCase();
-  if (sku) {
-    const bySku = candidates.find(
-      (product) => product.sku?.trim().toLowerCase() === sku,
-    );
-    if (bySku) {
-      return {
-        status: "match",
-        product: bySku,
-        score: 1,
-        reason: `SKU "${input.sku}" matched exactly`,
-      };
-    }
-  }
+  const identifier = matchByIdentifier(input, candidates);
+  if (identifier) return identifier;
 
   const inputTokens = tokenize(input.title);
   if (inputTokens.length === 0) {
@@ -221,8 +424,14 @@ export function matchProduct(
   }
 
   const inputVariant = extractVariant(inputTokens);
+  const inputModel = extractModelTokens(inputTokens);
+  const inputBundle = isBundleTitle(input.title);
+  const inputUsed = isUsedTitle(input.title);
   let brandRejected = 0;
   let variantRejected = 0;
+  let modelRejected = 0;
+  let bundleRejected = 0;
+  let conditionRejected = 0;
 
   const scored: { product: Product; score: number }[] = [];
 
@@ -238,11 +447,21 @@ export function matchProduct(
     const candidateTokens = tokensFor(product);
     const candidateVariant = extractVariant(candidateTokens);
 
-    // Storage is unambiguous: a 256GB listing is simply not a 128GB product.
+    // Capacity: a 128GB listing is not a 256GB product, and an 8GB graphics
+    // card is not a 16GB one. A title that states fewer capacities than the
+    // product ("Laptop 16GB" against "16GB / 512GB") is ambiguous rather than
+    // wrong, so only a genuine disagreement refuses.
+    if (conflicts(inputVariant.capacities, candidateVariant.capacities)) {
+      variantRejected += 1;
+      continue;
+    }
+
+    // Size: standalone numbers (model numbers, screen diagonals, apparel
+    // sizes) and letter sizes, each on its own so "Size 10" is never compared
+    // with "Size L".
     if (
-      inputVariant.storageGb &&
-      candidateVariant.storageGb &&
-      inputVariant.storageGb !== candidateVariant.storageGb
+      conflicts(inputVariant.numbers, candidateVariant.numbers) ||
+      conflicts(inputVariant.letters, candidateVariant.letters)
     ) {
       variantRejected += 1;
       continue;
@@ -251,6 +470,27 @@ export function matchProduct(
     // Same rule for colour, but only when both sides resolved a known colour.
     if (inputVariant.color && candidateVariant.color && inputVariant.color !== candidateVariant.color) {
       variantRejected += 1;
+      continue;
+    }
+
+    // Model-discriminating tokens are compared on both sides: "Pro", "Ti",
+    // "Max", "FE" or a differing generation on either side means the two
+    // titles are not the same product, whichever way round they are written.
+    if (modelConflicts(inputModel, extractModelTokens(candidateTokens))) {
+      modelRejected += 1;
+      continue;
+    }
+
+    // A bundle is a different purchasable from the standalone product.
+    if (inputBundle !== candidateIsBundle(product)) {
+      bundleRejected += 1;
+      continue;
+    }
+
+    // A used or refurbished unit is a different purchasable from a new one —
+    // comparing them would crown whichever is cheaper as this product's price.
+    if (inputUsed !== candidateIsUsed(product)) {
+      conditionRejected += 1;
       continue;
     }
 
@@ -264,6 +504,15 @@ export function matchProduct(
         `${variantRejected} candidate(s) rejected on variant conflict` +
           (inputVariant.storageGb ? ` (listing is ${inputVariant.storageGb}GB)` : ""),
       );
+    }
+    if (modelRejected > 0) {
+      reasons.push(`${modelRejected} rejected on model/generation mismatch`);
+    }
+    if (bundleRejected > 0) {
+      reasons.push(`${bundleRejected} rejected: bundle status differs`);
+    }
+    if (conditionRejected > 0) {
+      reasons.push(`${conditionRejected} rejected: condition differs (new vs used/refurbished)`);
     }
     if (brandRejected > 0) reasons.push(`${brandRejected} rejected on brand`);
     return {

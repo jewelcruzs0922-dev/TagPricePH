@@ -1,9 +1,9 @@
 import type { MetadataRoute } from "next";
-import { products } from "@/lib/data/products";
+import { listCatalog } from "@/lib/data/catalog";
 import { categories } from "@/lib/data/categories";
 import { baseUrl } from "@/lib/utils/seo";
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticRoutes: MetadataRoute.Sitemap = [
     { url: `${baseUrl}/`, changeFrequency: "daily", priority: 1 },
     { url: `${baseUrl}/search`, changeFrequency: "daily", priority: 0.7 },
@@ -20,6 +20,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.8,
   }));
 
+  // Enumerated from the active provider, never from the sample seed: a
+  // sitemap that lists pages the site does not serve sends crawlers after
+  // URLs that 404 (or worse, after sample products in a production build).
+  const products = await listCatalog();
   const productRoutes: MetadataRoute.Sitemap = products.map((product) => ({
     url: `${baseUrl}/product/${product.slug}`,
     changeFrequency: "daily" as const,

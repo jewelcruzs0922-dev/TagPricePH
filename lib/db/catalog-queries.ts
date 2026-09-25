@@ -35,14 +35,14 @@ export function chunkRows<T>(rows: T[], size = 1500): T[][] {
   return chunks;
 }
 
-/** 14 columns per row: see UPSERT parameter order in seed/ingest callers. */
+/** 16 columns per row: see UPSERT parameter order in seed/ingest callers. */
 export function upsertProductsSql(rowCount: number): string {
   return `
     INSERT INTO products
       (slug, name, brand, category_slug, sku, image, source,
        tagline, keywords, specs, rating, review_count,
-       previous_price_cents, drop_percent)
-    VALUES ${tuplePlaceholders(14, rowCount)}
+       previous_price_cents, drop_percent, model_number, gtin)
+    VALUES ${tuplePlaceholders(16, rowCount)}
     ON CONFLICT (slug) DO UPDATE SET
       name = EXCLUDED.name,
       brand = EXCLUDED.brand,
@@ -57,6 +57,8 @@ export function upsertProductsSql(rowCount: number): string {
       review_count = EXCLUDED.review_count,
       previous_price_cents = EXCLUDED.previous_price_cents,
       drop_percent = EXCLUDED.drop_percent,
+      model_number = EXCLUDED.model_number,
+      gtin = EXCLUDED.gtin,
       updated_at = now()
   `;
 }
@@ -73,14 +75,14 @@ export function upsertStoresSql(rowCount: number): string {
  * One listing per store page. `external_id` is the marketplace's own id when
  * the URL carries one, else the deterministic `slug:store` surrogate — the
  * same derivation rule db/migrations/0007 uses, kept identical on purpose.
- * 9 columns per row.
+ * 10 columns per row (affiliate_url stays NULL until a programme issues one).
  */
 export function upsertListingsSql(rowCount: number): string {
   return `
     INSERT INTO marketplace_listings
       (store_id, external_id, product_slug, title, product_url, seller_name,
-       source, status, last_seen_at)
-    VALUES ${tuplePlaceholders(9, rowCount)}
+       source, status, last_seen_at, affiliate_url)
+    VALUES ${tuplePlaceholders(10, rowCount)}
     ON CONFLICT (store_id, external_id) DO UPDATE SET
       product_slug = EXCLUDED.product_slug,
       title = EXCLUDED.title,
@@ -89,19 +91,27 @@ export function upsertListingsSql(rowCount: number): string {
       source = EXCLUDED.source,
       status = EXCLUDED.status,
       last_seen_at = EXCLUDED.last_seen_at,
+      affiliate_url = EXCLUDED.affiliate_url,
       updated_at = now()
   `;
 }
 
-/** 14 columns per row (currency is a real parameter, always 'PHP'). */
+/**
+ * 15 columns per row (currency is a real parameter, always 'PHP').
+ *
+ * Identity is (product_slug, store_id, external_id), matching migration
+ * 0011's unique index: one row per marketplace listing, so a second seller of
+ * the same product sits beside the first instead of overwriting it, and a
+ * re-ingest of that same listing updates in place.
+ */
 export function upsertOffersSql(rowCount: number): string {
   return `
     INSERT INTO offers
       (product_slug, store_id, price_cents, original_price_cents, currency,
        availability, seller, url, affiliate_url, condition, source,
-       listing_id, last_checked_at, updated_at)
-    VALUES ${tuplePlaceholders(14, rowCount)}
-    ON CONFLICT (product_slug, store_id) DO UPDATE SET
+       listing_id, last_checked_at, updated_at, external_id)
+    VALUES ${tuplePlaceholders(15, rowCount)}
+    ON CONFLICT (product_slug, store_id, external_id) DO UPDATE SET
       price_cents = EXCLUDED.price_cents,
       original_price_cents = EXCLUDED.original_price_cents,
       currency = EXCLUDED.currency,
@@ -161,10 +171,22 @@ export const OFFERS_FOR_SLUG_SQL = `
 `;
 
 /**
- * §21 prefilter: words matched against name/brand/slug/category, bounded at
- * 200 candidates and returning full rows so the in-process ranking
- * (search-core) runs on that set — never on a full-catalog load, and never
- * as the only matcher. User input is escaped so `%`/`_` are literals.
+ * §21 prefilter: words matched against the catalog's searchable identity,
+ * bounded at 200 candidates and returning full rows so the in-process ranking
+ * (search-core) runs on that set — never on a full-catalog load, and never as
+ * the only matcher.
+ *
+ * Two parameters, deliberately:
+ *  - $1 holds `%word%` patterns for the text fields (name, brand, slug,
+ *    category, model number, and the normalized keywords array, expanded with
+ *    unnest because ILIKE ANY does not accept an array on its left);
+ *  - $2 holds the raw words for exact identifier equality — a SKU, a model
+ *    number, a GTIN/EAN/UPC (compared case-insensitively, because part
+ *    numbers are written both ways), or a marketplace listing id (compared
+ *    exactly, because listing ids are case-sensitive paths).
+ *
+ * Identifier matching is exact on purpose: `%49712%` would happily match a
+ * different barcode. User input is escaped so `%`/`_` are literals.
  */
 export const CATALOG_SEARCH_SQL = `
   SELECT * FROM products
@@ -173,6 +195,18 @@ export const CATALOG_SEARCH_SQL = `
      OR brand ILIKE ANY($1::text[])
      OR slug ILIKE ANY($1::text[])
      OR category_slug ILIKE ANY($1::text[])
+     OR model_number ILIKE ANY($1::text[])
+     OR EXISTS (SELECT 1 FROM unnest(keywords) kw WHERE kw ILIKE ANY($1::text[]))
+     OR EXISTS (
+       SELECT 1 FROM unnest($2::text[]) w
+        WHERE upper(sku) = upper(w)
+           OR upper(model_number) = upper(w)
+           OR upper(gtin) = upper(w)
+     )
+     OR EXISTS (
+       SELECT 1 FROM marketplace_listings ml
+        WHERE ml.product_slug = products.slug AND ml.external_id = ANY($2::text[])
+     )
    )
    ORDER BY name
    LIMIT 200
@@ -211,6 +245,8 @@ export type CatalogProductRow = {
   review_count: number | null;
   previous_price_cents: number | null;
   drop_percent: number | null;
+  model_number: string | null;
+  gtin: string | null;
 };
 
 export type CatalogOfferRow = {
@@ -225,6 +261,8 @@ export type CatalogOfferRow = {
   source: string;
   last_checked_at: Date | string | null;
   updated_at: Date | string;
+  listing_id: number | string | null;
+  external_id: string;
 };
 
 export type CatalogSeriesRow = {
@@ -257,7 +295,7 @@ export function deriveExternalId(url: string, slug: string, storeId: string): st
  * never by this builder.
  */
 
-/** 14 columns — matches upsertProductsSql. */
+/** 16 columns — matches upsertProductsSql. */
 export function productRow(product: Product, source: DataSource): unknown[] {
   return [
     product.slug,
@@ -274,11 +312,13 @@ export function productRow(product: Product, source: DataSource): unknown[] {
     product.reviewCount ?? null,
     product.previousPrice != null ? toCents(product.previousPrice) : null,
     product.dropPercent ?? null,
+    product.modelNumber ?? null,
+    product.gtin ?? null,
   ];
 }
 
 /**
- * 9 columns — matches upsertListingsSql. Deduped by (store, external): one
+ * 10 columns — matches upsertListingsSql. Deduped by (store, external): one
  * URL is one listing, even when many products' offers share that URL (the
  * demo TikTok offers all point at one store page). Keeps ON CONFLICT
  * DO UPDATE from seeing the same key twice inside one statement.
@@ -302,14 +342,19 @@ export function listingRowsFor(products: Product[], source: DataSource): unknown
         source,
         offer.inStock ? "active" : "inactive",
         offer.updatedAt,
+        offer.affiliateUrl ?? null,
       ]);
     }
   }
   return rows;
 }
 
-/** 14 columns — matches upsertOffersSql. Affiliate link: null until an offer
- * carries one; the column exists so live providers can set it (§24). */
+/** 15 columns — matches upsertOffersSql. `affiliate_url` is written only
+ * when the offer actually carries one: a provider accepted into a
+ * marketplace's affiliate programme stores the link it was given, and nothing
+ * here can invent one (§24). `external_id` is derived by the same rule
+ * migrations 0007/0011 use, so the row lands on its own listing's key whether
+ * or not the caller resolved a listing id first. */
 export function offerRow(
   product: Product,
   offer: StoreOffer,
@@ -324,12 +369,13 @@ export function offerRow(
     offer.inStock ? "in_stock" : "out_of_stock",
     offer.seller ?? null,
     offer.url,
-    null,
+    offer.affiliateUrl ?? null,
     offer.condition ?? null,
     offer.source,
     listingId,
     offer.updatedAt,
     offer.updatedAt,
+    deriveExternalId(offer.url, product.slug, offer.storeId),
   ];
 }
 
@@ -367,6 +413,7 @@ export function assembleProduct(
     inStock: offer.availability === "in_stock",
     source: offer.source as DataSource,
     ...(offer.affiliate_url ? { affiliateUrl: offer.affiliate_url } : {}),
+    ...(offer.listing_id != null ? { listingId: Number(offer.listing_id) } : {}),
     ...(offer.seller ? { seller: offer.seller } : {}),
     ...(offer.condition
       ? { condition: offer.condition as "bundle" | "different_variant" }
@@ -380,6 +427,8 @@ export function assembleProduct(
     brand: row.brand,
     category: row.category_slug,
     ...(row.sku ? { sku: row.sku } : {}),
+    ...(row.model_number ? { modelNumber: row.model_number } : {}),
+    ...(row.gtin ? { gtin: row.gtin } : {}),
     ...(row.tagline ? { tagline: row.tagline } : {}),
     ...(row.keywords?.length ? { keywords: row.keywords } : {}),
     image: row.image,

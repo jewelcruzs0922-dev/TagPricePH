@@ -3,10 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { categories, getCategory } from "@/lib/data/categories";
-import { products, isDemoData } from "@/lib/data/products";
+import { getCategoryProducts } from "@/lib/data/catalog";
 import { baseUrl } from "@/lib/utils/seo";
 import { ProductCard } from "@/components/products/ProductCard";
 import { resolveBuyTimings } from "@/lib/db/observations";
+import { isSampleClaim } from "@/lib/trust";
 import { EmptyState } from "@/components/ui/States";
 
 type CategoryPageProps = {
@@ -40,8 +41,11 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
   const category = getCategory(slug);
   if (!category) notFound();
 
-  const items = products.filter((product) => product.category === category.slug);
+  const items = await getCategoryProducts(slug);
   const timings = await resolveBuyTimings(items);
+  // Conservative: the caveat shows unless *every* product here is observed,
+  // so one sample row can never be read as a page of live prices.
+  const sampleShown = items.some((product) => isSampleClaim(product));
 
   const breadcrumbLd = {
     "@context": "https://schema.org",
@@ -84,7 +88,7 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
           {category.name}
         </h1>
         <p className="mt-1 text-[16px] text-ink-2">{category.blurb}</p>
-        {isDemoData && (
+        {sampleShown && (
           <p className="mt-2 text-[13px] text-ink-3">
             Sample data — prices shown are illustrative, not live retailer prices.
           </p>

@@ -151,20 +151,25 @@ function unitChecks() {
   console.log("\nRow builders (shared by seed and ingest)");
   const sample = products[0];
   const pRow = productRow(sample, "live");
-  check("productRow is 14 columns", pRow.length === 14, String(pRow.length));
+  check("productRow is 16 columns", pRow.length === 16, String(pRow.length));
   check(
     "productRow takes its provenance from the caller, not the product",
     pRow[6] === "live" && productRow(sample, "demo")[6] === "demo",
   );
 
   const offers = offerRow(sample, sample.offers[0], 7);
-  check("offerRow is 14 columns", offers.length === 14, String(offers.length));
+  check("offerRow is 15 columns", offers.length === 15, String(offers.length));
   check(
     "offerRow links the listing id it is handed",
     offers[11] === 7,
     String(offers[11]),
   );
   check("offerRow carries no fabricated affiliate link", offers[8] === null);
+  check(
+    "offerRow derives the listing's external id the way migrations 0007/0011 do",
+    typeof offers[14] === "string" && offers[14].length > 0,
+    String(offers[14]),
+  );
 
   const shared = [
     { ...sample, slug: "a", name: "A", offers: sample.offers.map((o) => ({ ...o, storeId: "tiktok", url: "https://shop.tiktok.com/shop" })) },
@@ -177,9 +182,14 @@ function unitChecks() {
     String(collapsed.length),
   );
   check(
-    "listing rows are 9 columns with the derived external id",
-    collapsed[0].length === 9 && collapsed[0][1] !== "",
+    "listing rows are 10 columns with the derived external id",
+    collapsed[0].length === 10 && collapsed[0][1] !== "",
     JSON.stringify(collapsed[0]?.slice(0, 2)),
+  );
+  check(
+    "listing rows carry no fabricated affiliate link",
+    collapsed[0][9] === null,
+    String(collapsed[0][9]),
   );
 
   const stores = storeRowsFor(shared);
@@ -268,6 +278,19 @@ async function databaseChecks(client) {
   );
 
   console.log("\nAssembly fidelity (the statements db-provider runs)");
+  // The database knows which marketplace listing each offer is the current
+  // state of; the static seed has no listings, so `listingId` is the one
+  // legitimate difference between the two shapes. Everything else — money,
+  // provenance, freshness, availability, affiliate URL — must be identical.
+  const stripListingId = (product) => ({
+    ...product,
+    offers: product.offers.map((offer) => {
+      const copy = { ...offer };
+      delete copy.listingId;
+      return copy;
+    }),
+  });
+
   for (const slug of SAMPLE_SLUGS) {
     const staticProduct = getProductBySlug(slug);
     const [row] = (await client.query(PRODUCT_BY_SLUG_SQL, [slug])).rows;
@@ -280,8 +303,9 @@ async function databaseChecks(client) {
 
     check(
       `${slug} assembles identically to the static catalog`,
-      canonical(assembled, assembled.id) === canonical(staticProduct, assembled.id),
-      canonical(assembled, assembled.id).slice(0, 200),
+      canonical(stripListingId(assembled), assembled.id) ===
+        canonical(staticProduct, assembled.id),
+      canonical(stripListingId(assembled), assembled.id).slice(0, 200),
     );
     check(
       `${slug} keeps its history length in the database`,

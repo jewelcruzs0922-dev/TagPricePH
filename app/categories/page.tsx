@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { categories } from "@/lib/data/categories";
-import { products } from "@/lib/data/products";
+import { listCatalog } from "@/lib/data/catalog";
 import { CategoryCard } from "@/components/categories/CategoryCard";
 
 export const metadata: Metadata = {
@@ -10,7 +10,9 @@ export const metadata: Metadata = {
   alternates: { canonical: "/categories" },
 };
 
-export default function CategoriesPage() {
+export default async function CategoriesPage() {
+  const products = await listCatalog();
+
   return (
     <div className="container-page py-8 sm:py-10">
       <div className="mb-6 max-w-2xl">

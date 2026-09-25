@@ -244,28 +244,28 @@ async function main() {
     await expectFailure(
       client,
       "offer must reference a real product",
-      `INSERT INTO offers (product_slug, store_id, price_cents, url)
-       VALUES ('no-such-product', 'shopee', 1000, 'https://shopee.ph/x')`,
+      `INSERT INTO offers (product_slug, store_id, price_cents, url, external_id)
+       VALUES ('no-such-product', 'shopee', 1000, 'https://shopee.ph/x', '/x')`,
     );
     await expectFailure(
       client,
       "offer must reference a real store",
-      `INSERT INTO offers (product_slug, store_id, price_cents, url)
-       VALUES ($1, 'no-such-store', 1000, 'https://shopee.ph/x')`,
+      `INSERT INTO offers (product_slug, store_id, price_cents, url, external_id)
+       VALUES ($1, 'no-such-store', 1000, 'https://shopee.ph/x', '/x')`,
       [testCatalogSlug],
     );
     await expectFailure(
       client,
       "offer price must be positive",
-      `INSERT INTO offers (product_slug, store_id, price_cents, url)
-       VALUES ($1, 'shopee', 0, 'https://shopee.ph/x')`,
+      `INSERT INTO offers (product_slug, store_id, price_cents, url, external_id)
+       VALUES ($1, 'shopee', 0, 'https://shopee.ph/x', '/x')`,
       [testCatalogSlug],
     );
     await expectFailure(
       client,
       "currency must be PHP",
-      `INSERT INTO offers (product_slug, store_id, price_cents, currency, url)
-       VALUES ($1, 'shopee', 1000, 'USD', 'https://shopee.ph/x')`,
+      `INSERT INTO offers (product_slug, store_id, price_cents, currency, url, external_id)
+       VALUES ($1, 'shopee', 1000, 'USD', 'https://shopee.ph/x', '/x')`,
       [testCatalogSlug],
     );
     await expectFailure(
@@ -276,8 +276,8 @@ async function main() {
     );
 
     await client.query(
-      `INSERT INTO offers (product_slug, store_id, price_cents, url, last_checked_at)
-       VALUES ($1, 'shopee', 4599000, 'https://shopee.ph/verify', now())`,
+      `INSERT INTO offers (product_slug, store_id, price_cents, url, external_id, last_checked_at)
+       VALUES ($1, 'shopee', 4599000, 'https://shopee.ph/verify', '/verify', now())`,
       [testCatalogSlug],
     );
     const { rows: offerRead } = await client.query(
@@ -304,11 +304,33 @@ async function main() {
       `INSERT INTO product_variants (product_slug, name) VALUES ($1, '256GB')`,
       [testCatalogSlug],
     );
+
+    // Offer identity (migration 0011): the natural key is the listing the
+    // offer describes, not the pair — a marketplace has many sellers for one
+    // product, and re-ingesting the same listing must still be idempotent.
     await expectFailure(
       client,
-      "one offer per product and store",
-      `INSERT INTO offers (product_slug, store_id, price_cents, url)
-       VALUES ($1, 'shopee', 1, 'https://shopee.ph/y')`,
+      "one offer per product, store and external listing id",
+      `INSERT INTO offers (product_slug, store_id, price_cents, url, external_id)
+       VALUES ($1, 'shopee', 4599000, 'https://shopee.ph/verify', '/verify')`,
+      [testCatalogSlug],
+    );
+    await client.query(
+      `INSERT INTO offers (product_slug, store_id, price_cents, url, external_id)
+       VALUES ($1, 'shopee', 1, 'https://shopee.ph/y', '/y')`,
+      [testCatalogSlug],
+    );
+    const { rows: secondListing } = await client.query(
+      "SELECT count(*)::int AS n FROM offers WHERE product_slug = $1",
+      [testCatalogSlug],
+    );
+    check(
+      "a second listing for the same product and store is a separate offer",
+      secondListing[0].n === 2,
+      String(secondListing[0].n),
+    );
+    await client.query(
+      `DELETE FROM offers WHERE product_slug = $1 AND external_id = '/y'`,
       [testCatalogSlug],
     );
 

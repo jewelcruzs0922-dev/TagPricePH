@@ -6,7 +6,14 @@ import { CategoryCard } from "@/components/categories/CategoryCard";
 import { formatPeso } from "@/lib/utils/format";
 import { getSavings, getLowestOffer } from "@/lib/pricing";
 
-export function PriceDropsSection({ products }: { products: Product[] }) {
+export function PriceDropsSection({
+  products,
+  sample = true,
+}: {
+  products: Product[];
+  /** Whether the drops on show come from the sample catalog's reference price. */
+  sample?: boolean;
+}) {
   return (
     <section aria-labelledby="price-drops-heading" className="container-page">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
@@ -18,8 +25,9 @@ export function PriceDropsSection({ products }: { products: Product[] }) {
             Price Drops Today
           </h2>
           <p className="mt-1 text-[15px] text-ink-2">
-            Products whose sample price sits below the product&apos;s previous
-            listed price.
+            {sample
+              ? "Products whose sample price sits below the product\u2019s previous listed price."
+              : "Products whose current price sits below their most recent recorded observation."}
           </p>
         </div>
         <Link

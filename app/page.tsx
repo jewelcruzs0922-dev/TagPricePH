@@ -6,8 +6,9 @@ import {
   CategoriesSection,
   SavingsCta,
 } from "@/components/home/HomeSections";
-import { featuredProduct, priceDrops } from "@/lib/data/products";
+import { getFeaturedProduct, getHomePriceDrops } from "@/lib/data/catalog";
 import { categories } from "@/lib/data/categories";
+import { isSampleClaim } from "@/lib/trust";
 import { getSavings } from "@/lib/pricing";
 
 export const metadata: Metadata = {
@@ -17,7 +18,33 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
 };
 
-export default function HomePage() {
+export default async function HomePage() {
+  const [featuredProduct, priceDrops] = await Promise.all([
+    getFeaturedProduct(),
+    getHomePriceDrops(),
+  ]);
+
+  if (!featuredProduct) {
+    // No catalog to speak for. Saying so is the only honest option — a
+    // homepage built from a stale copy of the sample seed is what this read
+    // path exists to prevent.
+    return (
+      <div className="container-page py-16">
+        <h1 className="text-[26px] font-extrabold tracking-tight text-ink">
+          No products yet
+        </h1>
+        <p className="mt-3 max-w-xl text-[16px] text-ink-2">
+          The catalog is empty, so there is nothing to compare right now. In
+          demo mode, run the sample seed; in production, run{" "}
+          <code className="rounded bg-cream px-1.5 py-0.5 text-[14px]">
+            npm run catalog:seed
+          </code>{" "}
+          before serving from the database.
+        </p>
+      </div>
+    );
+  }
+
   const savings = getSavings(featuredProduct.offers);
 
   return (
@@ -25,7 +52,12 @@ export default function HomePage() {
       <Hero />
       <div className="space-y-14 pb-4 sm:space-y-16">
         <LowestPriceSection product={featuredProduct} />
-        <PriceDropsSection products={priceDrops} />
+        {priceDrops.length > 0 && (
+          <PriceDropsSection
+            products={priceDrops}
+            sample={priceDrops.some((item) => isSampleClaim(item))}
+          />
+        )}
         <CategoriesSection categories={categories} />
         <SavingsCta savings={savings} />
       </div>
