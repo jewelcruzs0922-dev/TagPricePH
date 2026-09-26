@@ -7,6 +7,7 @@
  * stripping, so this file loads in plain Node too.
  */
 import type { DataSource, Product, StoreOffer } from "@/lib/types";
+import { isSafeRedirectUrl } from "../api/affiliate.ts";
 import { fromCents, toCents } from "./money.ts";
 import { deriveExternalId } from "../data/listing-id.ts";
 
@@ -38,6 +39,19 @@ export function chunkRows<T>(rows: T[], size = 1500): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < rows.length; i += size) chunks.push(rows.slice(i, i + size));
   return chunks;
+}
+
+/**
+ * Affiliate URLs are validated BEFORE persistence (Final Polish §1): a URL is
+ * written only when it passes the same check the click path uses
+ * (`isSafeRedirectUrl` — https + exact allowlisted host). An unapproved URL is
+ * stored as NULL, and both upserts preserve the existing value on NULL, so a
+ * sync that carries no affiliate link — or a bad one — can never erase the
+ * monetisation link a previous run stored, never accepts an arbitrary host,
+ * and never fabricates parameters.
+ */
+function persistableAffiliate(url: string | null | undefined): string | null {
+  return url && isSafeRedirectUrl(url) ? url : null;
 }
 
 /** 16 columns per row: see UPSERT parameter order in seed/ingest callers. */
@@ -80,7 +94,9 @@ export function upsertStoresSql(rowCount: number): string {
  * One listing per store page. `external_id` is the marketplace's own id when
  * the URL carries one, else the deterministic `slug:store` surrogate — the
  * same derivation rule db/migrations/0007 uses, kept identical on purpose.
- * 10 columns per row (affiliate_url stays NULL until a programme issues one).
+ * `source`, `status`, `last_seen_at`, `affiliate_url` — affiliate_url is
+ * preserved on a NULL incoming value (COALESCE above), so a later sync
+ * without an affiliate link keeps the one already stored.
  */
 export function upsertListingsSql(rowCount: number): string {
   return `
@@ -96,7 +112,7 @@ export function upsertListingsSql(rowCount: number): string {
       source = EXCLUDED.source,
       status = EXCLUDED.status,
       last_seen_at = EXCLUDED.last_seen_at,
-      affiliate_url = EXCLUDED.affiliate_url,
+      affiliate_url = COALESCE(EXCLUDED.affiliate_url, marketplace_listings.affiliate_url),
       updated_at = now()
   `;
 }
@@ -120,11 +136,11 @@ export function upsertOffersSql(rowCount: number): string {
       price_cents = EXCLUDED.price_cents,
       original_price_cents = EXCLUDED.original_price_cents,
       currency = EXCLUDED.currency,
-      availability = EXCLUDED.availability,
-      seller = EXCLUDED.seller,
-      url = EXCLUDED.url,
-      affiliate_url = EXCLUDED.affiliate_url,
-      condition = EXCLUDED.condition,
+       availability = EXCLUDED.availability,
+       seller = EXCLUDED.seller,
+       url = EXCLUDED.url,
+       affiliate_url = COALESCE(EXCLUDED.affiliate_url, offers.affiliate_url),
+       condition = EXCLUDED.condition,
       source = EXCLUDED.source,
       listing_id = EXCLUDED.listing_id,
       last_checked_at = EXCLUDED.last_checked_at,
@@ -348,7 +364,7 @@ export function listingRowsFor(products: Product[], source: DataSource): unknown
         source,
         offer.inStock ? "active" : "inactive",
         offer.updatedAt,
-        offer.affiliateUrl ?? null,
+        persistableAffiliate(offer.affiliateUrl),
       ]);
     }
   }
@@ -356,11 +372,13 @@ export function listingRowsFor(products: Product[], source: DataSource): unknown
 }
 
 /** 15 columns — matches upsertOffersSql. `affiliate_url` is written only
- * when the offer actually carries one: a provider accepted into a
- * marketplace's affiliate programme stores the link it was given, and nothing
- * here can invent one (§24). `external_id` is derived by the same rule
- * migrations 0007/0011 use, so the row lands on its own listing's key whether
- * or not the caller resolved a listing id first. */
+ * when the offer carries an approved one: a provider accepted into a
+ * marketplace's affiliate programme stores the link it was given, validated
+ * against the allowlist before persistence (persistableAffiliate), and
+ * nothing here can invent one (§24). A NULL incoming value preserves the
+ * stored link via the upsert's COALESCE. `external_id` is derived by the same
+ * rule migrations 0007/0011 use, so the row lands on its own listing's key
+ * whether or not the caller resolved a listing id first. */
 export function offerRow(
   product: Product,
   offer: StoreOffer,
@@ -375,7 +393,7 @@ export function offerRow(
     offer.inStock ? "in_stock" : "out_of_stock",
     offer.seller ?? null,
     offer.url,
-    offer.affiliateUrl ?? null,
+    persistableAffiliate(offer.affiliateUrl),
     offer.condition ?? null,
     offer.source,
     listingId,

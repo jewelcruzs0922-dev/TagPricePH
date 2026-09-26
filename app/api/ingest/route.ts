@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getActiveProvider, getRegisteredProviderIds } from "@/lib/api/registry";
 import { clientIp, rateLimitResponse } from "@/lib/api/request-guard";
 import { planIngestion, providerRefusal, rowKey, screenRows } from "@/lib/data/ingest";
+import { mergeObservationChanges, revalidationPlan } from "@/lib/data/revalidate-plan";
 import { query } from "@/lib/db";
 import { syncCatalog } from "@/lib/db/catalog-sync";
 import { fromCents } from "@/lib/db/money";
@@ -145,19 +146,28 @@ async function ingest(request: NextRequest) {
       await recordObservations(accepted);
     }
 
-    // Targeted revalidation (Live Data Readiness §2): the rows changed, so
-    // the pages that show them are marked stale — the affected product pages
-    // by literal path, the catalog surfaces by their own path. The next visit
-    // regenerates one page at a time; nothing here rebuilds the site, and a
-    // revalidation that fails never fails the ingestion that already landed.
+    // Targeted revalidation (Final Polish §2): the catalog half reports the
+    // slugs whose rows actually differed from persisted state, and an
+    // accepted observation joins that set only when its price differs from
+    // the last recorded one for the same listing. Unchanged products are
+    // never touched, duplicate changes collapse into one revalidation per
+    // product (Set), and the global surfaces follow only when something
+    // changed. The next visit regenerates one page at a time under the
+    // existing ISR windows; nothing here rebuilds the site, and a
+    // revalidation failure never fails an ingestion that already landed.
+    const affected = new Set<string>(catalog.affectedSlugs);
+    mergeObservationChanges(affected, accepted, previous);
+    const plan = revalidationPlan(affected);
     try {
-      for (const slug of new Set(products.map((product) => product.slug))) {
+      for (const slug of plan.products) {
         revalidatePath(`/product/${slug}`);
       }
-      revalidatePath("/");
-      revalidatePath("/categories/[slug]", "page");
-      revalidatePath("/price-drops");
-      revalidatePath("/sitemap.xml");
+      if (plan.globals) {
+        revalidatePath("/");
+        revalidatePath("/categories/[slug]", "page");
+        revalidatePath("/price-drops");
+        revalidatePath("/sitemap.xml");
+      }
     } catch (error) {
       logEvent("warn", "ingest.revalidate-failed", {
         reason: error instanceof Error ? error.message : String(error),
@@ -175,6 +185,7 @@ async function ingest(request: NextRequest) {
       recorded: accepted.length,
       rejected: rejected.length,
       refusedProducts,
+      revalidated: plan.products.length,
     });
 
     return NextResponse.json(
@@ -187,6 +198,8 @@ async function ingest(request: NextRequest) {
         rejected: rejected.length,
         rejections: rejected,
         refusedProducts,
+        revalidated: plan.products.length,
+        revalidation_globals: plan.globals,
       },
       { headers: NO_STORE },
     );
