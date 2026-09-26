@@ -122,7 +122,7 @@ export function PriceHistoryChart({
               type="button"
               role="tab"
               aria-selected={range === item}
-              className={`min-h-9 rounded-full px-3 py-1.5 text-[13px] font-bold transition ${
+              className={`min-h-11 rounded-full px-3.5 py-1.5 text-[13px] font-bold transition ${
                 range === item
                   ? "bg-accent text-ink shadow-sm"
                   : "text-ink-2 hover:text-ink"
@@ -135,13 +135,30 @@ export function PriceHistoryChart({
         </div>
       </div>
 
-      {source !== "live" && (
+      {source !== "live" && points.length > 0 && (
         <p className="mb-2 text-[12px] leading-snug text-ink-2">
           Sample history for demonstration — not recorded retailer prices.
         </p>
       )}
 
-      <div className="relative">
+      {points.length === 0 ? (
+        <div
+          className="flex min-h-[160px] flex-col items-center justify-center rounded-xl border border-dashed border-line bg-cream/40 px-4 py-8 text-center"
+          role="status"
+        >
+          <p className="text-[15px] font-semibold text-ink">
+            {history.length === 0
+              ? "No price history yet"
+              : "No price points in this range"}
+          </p>
+          <p className="mt-1 text-[13px] text-ink-2">
+            {history.length === 0
+              ? "Once this product has recorded prices, its history will appear here."
+              : "Try a wider range above."}
+          </p>
+        </div>
+      ) : (
+        <div className="relative">
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="h-[200px] w-full"
@@ -229,8 +246,9 @@ export function PriceHistoryChart({
           </div>
         )}
       </div>
+      )}
 
-      {showSummary && (
+      {showSummary && points.length > 0 && (
         <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat
             label="Current"

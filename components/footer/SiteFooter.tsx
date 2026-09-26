@@ -50,7 +50,7 @@ export function SiteFooter() {
             <Link
               key={link.label}
               href={link.href}
-              className="text-[14px] font-medium text-ink-2 transition hover:text-ink"
+              className="inline-block py-1.5 text-[14px] font-medium text-ink-2 transition hover:text-ink"
             >
               {link.label}
             </Link>

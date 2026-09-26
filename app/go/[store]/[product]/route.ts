@@ -3,6 +3,7 @@ import { getActiveProvider } from "@/lib/api/registry";
 import { resolveOutboundUrl } from "@/lib/api/affiliate";
 import { isEligibleCurrentOffer } from "@/lib/pricing";
 import { recordClick } from "@/lib/db/clicks";
+import { logEvent } from "@/lib/log";
 
 type RouteContext = {
   params: Promise<{ store: string; product: string }>;
@@ -69,10 +70,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
         userAgent: request.headers.get("user-agent"),
       });
     } catch (error) {
-      console.error(
-        "Failed to record click_events row:",
-        error instanceof Error ? error.message : error,
-      );
+      logEvent("error", "click.record-failed", {
+        slug: productSlug,
+        store: storeId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
   });
 

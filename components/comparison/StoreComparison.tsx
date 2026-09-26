@@ -41,6 +41,21 @@ export function StoreComparison({
   );
   const bestPrice = sorted.find(canRank)?.price ?? 0;
 
+  if (sorted.length === 0) {
+    return (
+      <div
+        className="rounded-2xl border border-dashed border-line bg-cream/40 px-4 py-8 text-center"
+        role="status"
+      >
+        <p className="text-[15px] font-semibold text-ink">No store listings yet</p>
+        <p className="mt-1 text-[13px] text-ink-2">
+          We haven&apos;t found this product at any tracked store. Set a price
+          alert and we&apos;ll watch it for you.
+        </p>
+      </div>
+    );
+  }
+
   if (variant === "stack") {
     return (
       <ul className="flex flex-col gap-3">

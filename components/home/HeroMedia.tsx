@@ -28,14 +28,19 @@ const SLIDE_INTERVAL_MS = 3500;
 
 export function HeroMedia() {
   const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
+    // Auto-advance stops while the visitor has it paused, and never starts
+    // for reduced-motion users (WCAG 2.2.2: a pause mechanism must exist,
+    // and motion-sensitive users must not need it).
+    if (paused) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const timer = window.setInterval(() => {
       setIndex((current) => (current + 1) % slides.length);
     }, SLIDE_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [paused]);
 
   return (
     <div
@@ -74,6 +79,26 @@ export function HeroMedia() {
           </div>
         );
       })}
+      <button
+        type="button"
+        onClick={() => setPaused((value) => !value)}
+        aria-pressed={paused}
+        aria-label={
+          paused ? "Play the highlights slideshow" : "Pause the highlights slideshow"
+        }
+        className="absolute bottom-2 right-2 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-line bg-white/90 text-ink shadow-sm transition hover:bg-white focus-visible:outline-2"
+      >
+        {paused ? (
+          <svg width="14" height="16" viewBox="0 0 14 16" aria-hidden="true" fill="currentColor">
+            <path d="M1 1.5v13a1 1 0 0 0 1.53.85l10.5-6.5a1 1 0 0 0 0-1.7L2.53.65A1 1 0 0 0 1 1.5Z" />
+          </svg>
+        ) : (
+          <svg width="12" height="14" viewBox="0 0 12 14" aria-hidden="true" fill="currentColor">
+            <rect x="0" y="0" width="4" height="14" rx="1" />
+            <rect x="8" y="0" width="4" height="14" rx="1" />
+          </svg>
+        )}
+      </button>
     </div>
   );
 }

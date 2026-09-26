@@ -10,6 +10,8 @@ import {
 import { categories } from "@/lib/data/categories";
 import { stores } from "@/lib/data/stores";
 import { query } from "@/lib/db";
+import { searchStats } from "@/lib/db/search-queries";
+import { logEvent } from "@/lib/log";
 import type { Product } from "@/lib/types";
 import { getFreshness } from "@/lib/utils/freshness";
 
@@ -65,11 +67,34 @@ export type AdminStats = {
   alerts: { total: number; active: number; triggered: number; cancelled: number };
   clicks: number;
   views: number;
+  /** What shoppers searched for: lifetime count + the ten most common. */
+  searches: { total: number; top: { query: string; total: number }[] };
+  /** Most-viewed products (page_views), for deciding where data coverage pays off. */
+  topProducts: { slug: string; total: number }[];
+  /** Outbound clicks grouped by destination store — the affiliate funnel. */
+  clicksByStore: { store: string; total: number }[];
 };
 
 type CountRow = { total: number };
 type ObservationRow = { total: number; latest: Date | string | null };
 type AlertStatusRow = { status: string; total: number };
+type KeyCountRow = { key: string; total: number };
+
+const TOP_PRODUCTS_SQL = `
+  SELECT product_slug AS key, COUNT(*)::int AS total
+  FROM page_views
+  GROUP BY product_slug
+  ORDER BY total DESC, MAX(created_at) DESC
+  LIMIT 10
+`;
+
+const CLICKS_BY_STORE_SQL = `
+  SELECT store_id AS key, COUNT(*)::int AS total
+  FROM click_events
+  GROUP BY store_id
+  ORDER BY total DESC, MAX(created_at) DESC
+  LIMIT 10
+`;
 
 function toIso(value: Date | string | null): string | null {
   if (!value) return null;
@@ -159,26 +184,29 @@ async function loadCatalog(): Promise<Product[]> {
   try {
     return await getActiveProvider().listProducts();
   } catch (error) {
-    console.error(
-      "Admin stats could not read the active catalog:",
-      error instanceof Error ? error.message : error,
-    );
+    logEvent("error", "admin.catalog-read-failed", {
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return [];
   }
 }
 
 export async function loadAdminStats(): Promise<AdminStats> {
-  const [catalog, observationRows, alertRows, clickRows, viewRows] = await Promise.all([
-    loadCatalog(),
-    query<ObservationRow>(
-      "SELECT COUNT(*)::int AS total, MAX(observed_at) AS latest FROM price_observations",
-    ),
-    query<AlertStatusRow>(
-      "SELECT status, COUNT(*)::int AS total FROM price_alerts GROUP BY status",
-    ),
-    query<CountRow>("SELECT COUNT(*)::int AS total FROM click_events"),
-    query<CountRow>("SELECT COUNT(*)::int AS total FROM page_views"),
-  ]);
+  const [catalog, observationRows, alertRows, clickRows, viewRows, searches, topProductRows, clickStoreRows] =
+    await Promise.all([
+      loadCatalog(),
+      query<ObservationRow>(
+        "SELECT COUNT(*)::int AS total, MAX(observed_at) AS latest FROM price_observations",
+      ),
+      query<AlertStatusRow>(
+        "SELECT status, COUNT(*)::int AS total FROM price_alerts GROUP BY status",
+      ),
+      query<CountRow>("SELECT COUNT(*)::int AS total FROM click_events"),
+      query<CountRow>("SELECT COUNT(*)::int AS total FROM page_views"),
+      searchStats(),
+      query<KeyCountRow>(TOP_PRODUCTS_SQL),
+      query<KeyCountRow>(CLICKS_BY_STORE_SQL),
+    ]);
 
   const alerts = { total: 0, active: 0, triggered: 0, cancelled: 0 };
   for (const row of alertRows) {
@@ -203,5 +231,8 @@ export async function loadAdminStats(): Promise<AdminStats> {
     alerts,
     clicks: clickRows[0]?.total ?? 0,
     views: viewRows[0]?.total ?? 0,
+    searches,
+    topProducts: topProductRows.map((row) => ({ slug: row.key, total: row.total })),
+    clicksByStore: clickStoreRows.map((row) => ({ store: row.key, total: row.total })),
   };
 }

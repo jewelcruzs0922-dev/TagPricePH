@@ -4,6 +4,7 @@ import { parsePage, parseSearchParams } from "@/lib/data/search-url";
 import { toClientProducts } from "@/lib/data/search-core";
 import { runSearch, SEARCH_PAGE_SIZE } from "@/lib/search/run-search";
 import { resolveBuyTimings } from "@/lib/db/observations";
+import { logEvent } from "@/lib/log";
 import { consumeRateLimit, type RateLimitState } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -52,8 +53,11 @@ export async function GET(request: NextRequest) {
       page,
       hasMore: start + window.length < results.length,
     });
-  } catch {
-    // Deliberately carries no exception detail: this is a public endpoint.
+  } catch (error) {
+    // Fixed body for the caller; the exception detail goes to the log drain.
+    logEvent("error", "search.failed", {
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       { error: "search failed" },
       { status: 500, headers: { "Cache-Control": "no-store" } },

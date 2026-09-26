@@ -3,6 +3,7 @@ import { getActiveProvider } from "@/lib/api/registry";
 import { clientIp, rateLimitResponse } from "@/lib/api/request-guard";
 import { capQuery } from "@/lib/data/search-url";
 import { filterSuggestions, toClientProducts } from "@/lib/data/search-core";
+import { logEvent } from "@/lib/log";
 import { consumeRateLimit, type RateLimitState } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +44,10 @@ export async function GET(request: NextRequest) {
     const q = capQuery(request.nextUrl.searchParams.get("q") ?? "");
     const matches = await getActiveProvider().searchProducts(q);
     return NextResponse.json(toClientProducts(filterSuggestions(matches, q)));
-  } catch {
+  } catch (error) {
+    logEvent("error", "suggestions.failed", {
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       { error: "suggestions failed" },
       { status: 500, headers: { "Cache-Control": "no-store" } },

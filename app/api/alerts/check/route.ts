@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
 const AUTH_LIMIT = { limit: 10, windowMs: 60_000 };
 const authFailures: RateLimitState = new Map();
 
-export async function POST(request: NextRequest) {
+async function handleCheck(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret) {
     logEvent("warn", "alerts.cron.disabled", {});
@@ -92,4 +92,15 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ error: "check failed" }, { status: 500 });
   }
+}
+
+// Vercel cron jobs send GET; manual callers (and the verification suites)
+// send POST. Both take the identical fail-closed bearer path above — there is
+// deliberately no method with weaker authorization.
+export async function GET(request: NextRequest) {
+  return handleCheck(request);
+}
+
+export async function POST(request: NextRequest) {
+  return handleCheck(request);
 }

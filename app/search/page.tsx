@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
+import { after } from "next/server";
 import { SearchBar } from "@/components/search/SearchBar";
 import { SearchResults } from "@/components/search/SearchResults";
 import { getCatalogBrands } from "@/lib/data/catalog";
 import { capQuery } from "@/lib/data/search-url";
 import { isProductUrl, toClientProducts } from "@/lib/data/search-core";
+import { recordSearchQuery } from "@/lib/db/search-queries";
 import { isSampleClaim } from "@/lib/trust";
 import { resolveBuyTimings } from "@/lib/db/observations";
 import { DEFAULT_FILTERS, DEFAULT_SORT, SEARCH_PAGE_SIZE, runSearch } from "@/lib/search/run-search";
@@ -24,6 +26,8 @@ export async function generateMetadata({
       title: "Search products",
       description: "Search products and compare prices across Philippine stores.",
       alternates: { canonical: "/search" },
+      // Internal search results are utility pages, not index-worthy content.
+      robots: { index: false, follow: true },
     };
   }
   if (isProductUrl(q)) {
@@ -32,12 +36,14 @@ export async function generateMetadata({
       title: "Product link",
       description: "Compare prices for the product link you pasted across Philippine stores.",
       alternates: { canonical: `/search?q=${encodeURIComponent(q)}` },
+      robots: { index: false, follow: true },
     };
   }
   return {
     title: `Results for “${q}”`,
     description: `Compare the lowest prices for ${q} across Shopee, Lazada, TikTok Shop, and more.`,
     alternates: { canonical: `/search?q=${encodeURIComponent(q)}` },
+    robots: { index: false, follow: true },
   };
 }
 
@@ -52,6 +58,12 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     filters: DEFAULT_FILTERS,
     sort: DEFAULT_SORT,
   });
+  // Business analytics: what shoppers search for and how much it finds.
+  // Runs after the response is flushed, and recordSearchQuery never throws,
+  // so measurement can never delay or break the search itself.
+  if (q) {
+    after(() => recordSearchQuery(q, results.length));
+  }
   const brands = await getCatalogBrands();
   const pastedLink = isProductUrl(q);
   // Conservative: the caveat shows if any result is sample data, so a mixed

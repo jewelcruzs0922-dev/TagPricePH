@@ -160,14 +160,17 @@ export default async function ProductPage({ params }: ProductPageProps) {
       <nav aria-label="Breadcrumb" className="mb-5">
         <ol className="flex flex-wrap items-center gap-2 text-[14px] text-ink-2">
           <li>
-            <Link href="/" className="inline-flex items-center gap-1 hover:text-ink">
+            <Link href="/" className="inline-flex items-center gap-1 py-1 hover:text-ink">
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               Home
             </Link>
           </li>
           <li aria-hidden="true">/</li>
           <li>
-            <Link href={`/categories/${product.category}`} className="hover:text-ink">
+            <Link
+              href={`/categories/${product.category}`}
+              className="inline-block py-1 hover:text-ink"
+            >
               {category?.name ?? product.category.replace(/-/g, " ")}
             </Link>
           </li>
@@ -378,25 +381,27 @@ export default async function ProductPage({ params }: ProductPageProps) {
         </div>
       </section>
 
-      <section aria-labelledby="related-heading" className="mt-10">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 id="related-heading" className="text-[20px] font-extrabold text-ink">
-            You might also compare
-          </h2>
-          <Link href="/search" className="text-[15px] font-semibold hover:underline">
-            Browse all
-          </Link>
-        </div>
-        <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-          {related.map((item) => (
-            <ProductCard
-              key={item.id}
-              product={item}
-              timing={relatedTimings[item.slug]}
-            />
-          ))}
-        </div>
-      </section>
+      {related.length > 0 && (
+        <section aria-labelledby="related-heading" className="mt-10">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 id="related-heading" className="text-[20px] font-extrabold text-ink">
+              You might also compare
+            </h2>
+            <Link href="/search" className="text-[15px] font-semibold hover:underline">
+              Browse all
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+            {related.map((item) => (
+              <ProductCard
+                key={item.id}
+                product={item}
+                timing={relatedTimings[item.slug]}
+              />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/request-guard";
 import { parseProductView } from "@/lib/data/view-events";
 import { recordProductView } from "@/lib/db/views";
+import { logEvent } from "@/lib/log";
 import { consumeRateLimit, type RateLimitState } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -53,11 +54,12 @@ export async function POST(request: Request) {
     if (!product) return new NextResponse(null, { status: 404 });
     await recordProductView(event);
   } catch (error) {
-    // Carries no exception detail: this is a public endpoint.
-    console.error(
-      "product view not recorded:",
-      error instanceof Error ? error.message : error,
-    );
+    // Structured for the log drain; the HTTP response carries no detail —
+    // this is a public endpoint.
+    logEvent("error", "views.record-failed", {
+      slug: event.productSlug,
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return new NextResponse(null, { status: 500 });
   }
 

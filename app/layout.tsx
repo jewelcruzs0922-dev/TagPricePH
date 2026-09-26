@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { TagPricePHHeader } from "@/components/header/TagPricePHHeader";
 import { SiteFooter } from "@/components/footer/SiteFooter";
 import { baseUrl, metadataConfig } from "@/lib/utils/seo";
+import { serializeJsonLd } from "@/lib/utils/jsonld";
 import "./globals.css";
 
 const outfit = Outfit({
@@ -36,11 +37,20 @@ export const metadata: Metadata = {
     siteName: "TagPricePH",
     title: metadataConfig.title,
     description: metadataConfig.description,
+    images: [
+      {
+        url: "/images/hero-media-1.png",
+        width: 1536,
+        height: 1024,
+        alt: "TagPricePH comparing prices across Philippine stores",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: metadataConfig.title,
     description: metadataConfig.description,
+    images: ["/images/hero-media-1.png"],
   },
   alternates: {
     canonical: "/",
@@ -54,12 +64,43 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+/**
+ * Site-level structured data. Product and breadcrumb schema live on their own
+ * pages; this is the organization/site identity every page inherits.
+ * Serialized through serializeJsonLd so stored strings can never break out of
+ * the script block.
+ */
+const siteJsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": `${baseUrl}/#organization`,
+      name: "TagPricePH",
+      url: baseUrl,
+      logo: `${baseUrl}/images/logo.png`,
+    },
+    {
+      "@type": "WebSite",
+      "@id": `${baseUrl}/#website`,
+      name: "TagPricePH",
+      url: baseUrl,
+      inLanguage: "en-PH",
+      publisher: { "@id": `${baseUrl}/#organization` },
+    },
+  ],
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en-PH">
       <body className={`${outfit.variable} antialiased`}>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(siteJsonLd) }}
+        />
         <a
           href="#main"
           className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-ink focus:px-4 focus:py-2 focus:text-white"

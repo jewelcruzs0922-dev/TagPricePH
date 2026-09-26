@@ -250,7 +250,7 @@ export function SearchBar({
       {query && (
         <button
           type="button"
-          className="absolute right-[60px] top-1/2 -translate-y-1/2 rounded-full p-2.5 text-ink-3 hover:text-ink"
+          className="absolute right-[60px] top-1/2 -translate-y-1/2 rounded-full p-3.5 text-ink-3 hover:text-ink"
           onClick={() => {
             setQuery("");
             inputRef.current?.focus();

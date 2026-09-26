@@ -50,6 +50,34 @@ function Section({
   );
 }
 
+function RankList({
+  items,
+  emptyLabel,
+}: {
+  items: { label: string; total: number }[];
+  emptyLabel: string;
+}) {
+  if (items.length === 0) {
+    return <p className="text-sm text-ink-3">{emptyLabel}</p>;
+  }
+  return (
+    <ol className="space-y-1.5">
+      {items.map((item, index) => (
+        <li
+          key={item.label}
+          className="flex items-center justify-between gap-3 rounded-lg border border-line bg-white px-3 py-2 text-sm"
+        >
+          <span className="min-w-0 truncate text-ink">
+            <span className="mr-2 text-ink-3">{index + 1}.</span>
+            {item.label}
+          </span>
+          <span className="shrink-0 font-semibold text-ink-2">{item.total}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function Dashboard({ stats }: { stats: AdminStats }) {
   return (
     <div data-admin="dashboard" className="space-y-6">
@@ -204,10 +232,45 @@ function Dashboard({ stats }: { stats: AdminStats }) {
       </Section>
 
       <Section title="Engagement" adminKey="engagement">
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           <Stat label="Outbound clicks" value={stats.clicks} />
-          <Stat label="Page views" value={stats.views} />
+          <Stat label="Product views" value={stats.views} />
+          <Stat label="Searches" value={stats.searches.total} />
         </div>
+        <p className="mt-3 text-sm text-ink-3">
+          Funnel so far: search → product view → outbound click. Counts are
+          lifetime totals from page_views, click_events, and search_queries.
+        </p>
+      </Section>
+
+      <Section title="Top searches" adminKey="searches">
+        <RankList
+          items={stats.searches.top.map((row) => ({
+            label: row.query,
+            total: row.total,
+          }))}
+          emptyLabel="No searches recorded yet."
+        />
+      </Section>
+
+      <Section title="Most viewed products" adminKey="top-products">
+        <RankList
+          items={stats.topProducts.map((row) => ({
+            label: row.slug,
+            total: row.total,
+          }))}
+          emptyLabel="No product views recorded yet."
+        />
+      </Section>
+
+      <Section title="Clicks by store" adminKey="clicks-by-store">
+        <RankList
+          items={stats.clicksByStore.map((row) => ({
+            label: row.store,
+            total: row.total,
+          }))}
+          emptyLabel="No outbound clicks recorded yet."
+        />
       </Section>
     </div>
   );
