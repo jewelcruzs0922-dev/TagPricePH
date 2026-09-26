@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Outfit } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import { TagPricePHHeader } from "@/components/header/TagPricePHHeader";
 import { SiteFooter } from "@/components/footer/SiteFooter";
 import { baseUrl, metadataConfig } from "@/lib/utils/seo";
@@ -66,6 +67,7 @@ export default function RootLayout({
         <TagPricePHHeader />
         <main id="main">{children}</main>
         <SiteFooter />
+        <Analytics />
       </body>
     </html>
   );
