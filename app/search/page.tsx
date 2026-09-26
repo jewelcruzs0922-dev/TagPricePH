@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { SearchBar } from "@/components/search/SearchBar";
 import { SearchResults } from "@/components/search/SearchResults";
 import { getCatalogBrands } from "@/lib/data/catalog";
+import { capQuery } from "@/lib/data/search-url";
 import { isProductUrl, toClientProducts } from "@/lib/data/search-core";
 import { isSampleClaim } from "@/lib/trust";
 import { resolveBuyTimings } from "@/lib/db/observations";
@@ -15,7 +16,9 @@ export async function generateMetadata({
   searchParams,
 }: SearchPageProps): Promise<Metadata> {
   const params = await searchParams;
-  const q = Array.isArray(params.q) ? params.q[0] : params.q;
+  const q = capQuery(
+    Array.isArray(params.q) ? (params.q[0] ?? "") : (params.q ?? ""),
+  );
   if (!q) {
     return {
       title: "Search products",
@@ -40,7 +43,9 @@ export async function generateMetadata({
 
 export default async function SearchPage({ searchParams }: SearchPageProps) {
   const params = await searchParams;
-  const q = Array.isArray(params.q) ? params.q[0] : (params.q ?? "");
+  const q = capQuery(
+    Array.isArray(params.q) ? (params.q[0] ?? "") : (params.q ?? ""),
+  );
 
   const { results, note } = await runSearch({
     q,
@@ -77,12 +82,12 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             : "Filter by category, brand, store, and price. Sorted so the lowest price is easy to spot."}
         </p>
         <div className="mt-4">
-          <SearchBar size="md" />
+          <SearchBar size="md" initialQuery={q} />
         </div>
       </div>
 
       {sampleShown && (
-        <p className="mb-4 text-[13px] text-ink-3">
+        <p className="mb-4 text-[13px] text-ink-2">
           Sample data — prices shown are illustrative, not live retailer prices.
         </p>
       )}

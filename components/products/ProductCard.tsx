@@ -4,6 +4,7 @@ import type { BuyTiming, Product } from "@/lib/types";
 import { getLowestOffer, getPriceDropPercent, evaluateBuyTiming } from "@/lib/pricing";
 import { getStore } from "@/lib/data/stores";
 import { formatPeso } from "@/lib/utils/format";
+import { isSampleClaim } from "@/lib/trust";
 import { StoreLogo } from "@/components/ui/StoreLogo";
 import { ArrowRight } from "lucide-react";
 
@@ -24,6 +25,9 @@ export function ProductCard({
   const drop = getPriceDropPercent(product);
   const verdict = timing ?? evaluateBuyTiming(product);
   const storeId = lowest?.storeId ?? product.offers[0]?.storeId ?? "shopee";
+  // The reference ("was") price only exists in the sample catalog — showing it
+  // on a live-sourced product would publish a number nobody observed.
+  const previousPrice = isSampleClaim(product) ? product.previousPrice : null;
 
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-white transition hover:border-[#d9d4c4]">
@@ -62,14 +66,12 @@ export function ProductCard({
             </p>
             <p
               className={`text-[13px] ${
-                product.previousPrice
-                  ? "text-ink-3 line-through"
-                  : "invisible"
+                previousPrice ? "text-ink-2 line-through" : "invisible"
               }`}
-              aria-hidden={!product.previousPrice}
+              aria-hidden={!previousPrice}
             >
-              {product.previousPrice
-                ? formatPeso(product.previousPrice)
+              {previousPrice
+                ? formatPeso(previousPrice)
                 : formatPeso(lowest?.price ?? 0)}
             </p>
           </div>

@@ -136,7 +136,7 @@ export function PriceHistoryChart({
       </div>
 
       {source !== "live" && (
-        <p className="mb-2 text-[12px] leading-snug text-ink-3">
+        <p className="mb-2 text-[12px] leading-snug text-ink-2">
           Sample history for demonstration — not recorded retailer prices.
         </p>
       )}
@@ -220,7 +220,7 @@ export function PriceHistoryChart({
               top: `${Math.max((last.y / height) * 100 - 18, 0)}%`,
             }}
           >
-            <p className="text-[11px] font-semibold text-ink-3">
+            <p className="text-[11px] font-semibold text-ink-2">
               {current !== null ? "Today" : "Last recorded"}
             </p>
             <p className="text-[13px] font-extrabold leading-tight text-ink">
@@ -257,7 +257,7 @@ function Stat({
 }) {
   return (
     <div className="rounded-xl border border-line bg-cream/50 px-2.5 py-2">
-      <dt className="text-[12px] font-semibold uppercase tracking-wide text-ink-3">
+      <dt className="text-[12px] font-semibold uppercase tracking-wide text-ink-2">
         {label}
       </dt>
       <dd

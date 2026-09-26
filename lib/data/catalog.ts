@@ -1,10 +1,11 @@
 import "server-only";
 
+import { cache } from "react";
 import type { Product } from "@/lib/types";
 import { getActiveProvider } from "@/lib/api/registry";
 import { priceDropSlugs } from "@/lib/data/products";
 import { getBrandsFrom } from "@/lib/data/search-core";
-import { buildPriceDropFeed } from "@/lib/data/price-drops";
+import { buildPriceDropFeed, type PriceDropFeed } from "@/lib/data/price-drops";
 
 /**
  * The catalog, read through the active provider.
@@ -24,10 +25,14 @@ import { buildPriceDropFeed } from "@/lib/data/price-drops";
 
 export const FEATURED_PRODUCT_SLUG = "iphone-16-128gb";
 
-/** Every product the active provider serves. */
-export function listCatalog(): Promise<Product[]> {
-  return getActiveProvider().listProducts();
-}
+/**
+ * Every product the active provider serves, memoized for the duration of one
+ * request — the homepage alone asks for the catalog three times (featured
+ * product, drop row, brands) and each call is a provider round trip.
+ */
+export const listCatalog = cache((): Promise<Product[]> =>
+  getActiveProvider().listProducts(),
+);
 
 /** The active catalog restricted to one category, for the category grid. */
 export async function getCategoryProducts(categorySlug: string): Promise<Product[]> {
@@ -60,17 +65,20 @@ export async function getFeaturedProduct(): Promise<Product | null> {
  * nothing dropped, which hides the section rather than decorating products
  * that have not.
  */
-export async function getHomePriceDrops(): Promise<Product[]> {
+export async function getHomePriceDrops(): Promise<PriceDropFeed> {
   const products = await listCatalog();
   const feed = await buildPriceDropFeed(products);
-  if (feed.products.length === 0) return [];
+  if (feed.products.length === 0) return feed;
 
   const inFeed = new Map(feed.products.map((product) => [product.slug, product]));
   const curated = priceDropSlugs
     .map((slug) => inFeed.get(slug))
     .filter((product): product is Product => product !== undefined);
 
-  return (curated.length > 0 ? curated : feed.products).slice(0, 5);
+  return {
+    ...feed,
+    products: (curated.length > 0 ? curated : feed.products).slice(0, 5),
+  };
 }
 
 /** Distinct brands in the active catalog, for the search facet. */

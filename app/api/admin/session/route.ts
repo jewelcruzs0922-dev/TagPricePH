@@ -5,6 +5,17 @@ import {
   hashToken,
   verifyAdminToken,
 } from "@/lib/admin/token";
+import {
+  clientIp,
+  rateLimitResponse,
+  rejectUnsafeJsonPost,
+} from "@/lib/api/request-guard";
+import {
+  clearFailures,
+  failureBudgetVerdict,
+  recordFailure,
+  type RateLimitState,
+} from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +27,12 @@ export const dynamic = "force-dynamic";
  * token gets 401, an unconfigured deployment gets 503 — there is no default
  * token anywhere, so an installation that has not set ADMIN_TOKEN simply has
  * no admin area to find.
+ *
+ * Wrong guesses count against a per-IP failure budget (429 with Retry-After
+ * once it runs out), and a correct token clears the budget — so a person who
+ * mistypes is slowed down, never locked out, while unattended guessing is
+ * throttled. The constant-time comparison in lib/admin/token.ts stops timing
+ * probes; this stops volume.
  */
 
 const cookieOptions = {
@@ -25,7 +42,19 @@ const cookieOptions = {
   path: "/",
 };
 
+const AUTH_LIMIT = { limit: 10, windowMs: 60_000 };
+const authFailures: RateLimitState = new Map();
+
 export async function POST(request: NextRequest) {
+  const rejected = rejectUnsafeJsonPost(request);
+  if (rejected) return rejected;
+
+  const key = `admin-login:${clientIp(request)}`;
+  const budget = failureBudgetVerdict(authFailures, key, AUTH_LIMIT);
+  if (!budget.allowed) {
+    return rateLimitResponse(budget, "too many attempts — wait a moment")!;
+  }
+
   let payload: { token?: unknown } | null = null;
   try {
     payload = await request.json();
@@ -40,9 +69,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "admin is not configured" }, { status: 503 });
   }
   if (verdict === "mismatch" || !token) {
+    recordFailure(authFailures, key, AUTH_LIMIT);
     return NextResponse.json({ error: "invalid token" }, { status: 401 });
   }
 
+  clearFailures(authFailures, key);
   const response = new NextResponse(null, { status: 204 });
   response.cookies.set(ADMIN_COOKIE, hashToken(token), {
     ...cookieOptions,

@@ -4,15 +4,18 @@ import type { Product, Category } from "@/lib/types";
 import { PriceDropCard } from "@/components/products/PriceDropCard";
 import { CategoryCard } from "@/components/categories/CategoryCard";
 import { formatPeso } from "@/lib/utils/format";
-import { getSavings, getLowestOffer } from "@/lib/pricing";
+import { getSavings, getLowestOffer, type RecordedDrop } from "@/lib/pricing";
 
 export function PriceDropsSection({
   products,
   sample = true,
+  recorded,
 }: {
   products: Product[];
   /** Whether the drops on show come from the sample catalog's reference price. */
   sample?: boolean;
+  /** Verified drops by slug, so the cards badge the same drop the feed did. */
+  recorded?: Map<string, RecordedDrop>;
 }) {
   return (
     <section aria-labelledby="price-drops-heading" className="container-page">
@@ -41,7 +44,11 @@ export function PriceDropsSection({
 
       <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
         {products.map((product) => (
-          <PriceDropCard key={product.id} product={product} />
+          <PriceDropCard
+            key={product.id}
+            product={product}
+            recorded={recorded?.get(product.slug)}
+          />
         ))}
       </div>
     </section>

@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getActiveProvider } from "@/lib/api/registry";
+import { clientIp, rateLimitResponse } from "@/lib/api/request-guard";
+import { capQuery } from "@/lib/data/search-url";
 import { filterSuggestions, toClientProducts } from "@/lib/data/search-core";
+import { consumeRateLimit, type RateLimitState } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
+
+const SUGGESTIONS_LIMIT = { limit: 120, windowMs: 60_000 };
+const suggestionBuckets: RateLimitState = new Map();
 
 /**
  * Typeahead backing for the search bar.
@@ -23,8 +29,18 @@ export const dynamic = "force-dynamic";
  * suggestions" and keeps working.
  */
 export async function GET(request: NextRequest) {
+  const limited = rateLimitResponse(
+    consumeRateLimit(
+      suggestionBuckets,
+      `suggestions:${clientIp(request)}`,
+      SUGGESTIONS_LIMIT,
+    ),
+    "too many requests",
+  );
+  if (limited) return limited;
+
   try {
-    const q = request.nextUrl.searchParams.get("q") ?? "";
+    const q = capQuery(request.nextUrl.searchParams.get("q") ?? "");
     const matches = await getActiveProvider().searchProducts(q);
     return NextResponse.json(toClientProducts(filterSuggestions(matches, q)));
   } catch {

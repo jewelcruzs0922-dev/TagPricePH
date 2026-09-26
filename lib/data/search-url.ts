@@ -53,6 +53,19 @@ export function parsePage(params: URLSearchParams): number {
   return Math.min(Math.trunc(parsed), 1_000);
 }
 
+/**
+ * Longest query the search will accept — filters have been capped at 120
+ * chars all along, but `q` was read raw, so a multi-megabyte parameter went
+ * straight into ILIKE patterns and the fuzzy pass. Real queries are product
+ * names, far below this.
+ */
+export const MAX_QUERY_LENGTH = 300;
+
+/** Clamp a raw query to MAX_QUERY_LENGTH. Dependency-free by design. */
+export function capQuery(query: string): string {
+  return query.length > MAX_QUERY_LENGTH ? query.slice(0, MAX_QUERY_LENGTH) : query;
+}
+
 function readBool(value: string | null): boolean | undefined {
   if (value === null) return undefined;
   const normalized = value.trim().toLowerCase();
@@ -106,5 +119,5 @@ export function parseSearchParams(params: URLSearchParams): {
     ? (rawSort as SearchSort)
     : "lowest-price";
 
-  return { q: params.get("q") ?? "", filters, sort };
+  return { q: capQuery(params.get("q") ?? ""), filters, sort };
 }

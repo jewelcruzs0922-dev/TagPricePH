@@ -24,7 +24,7 @@ const faqs = [
   },
   {
     q: "Do price alerts send emails?",
-    a: "Not yet. Alerts in this demo are stored only in your browser (localStorage). A backend is required before notifications can be delivered.",
+    a: "Not yet. You file an alert with your email and it is stored on our server, so it follows you to any device on the Alerts page — but no email or push notification is sent yet.",
   },
   {
     q: "How does TagPricePH make money?",
@@ -63,9 +63,13 @@ export default function HelpPage() {
         <section id="privacy" className="card p-5">
           <h2 className="text-[18px] font-bold text-ink">Privacy</h2>
           <p className="mt-2 text-[15px] text-ink-2">
-            This demo stores price alerts locally in your browser. Nothing is sent to a
-            server. Clear site data to remove them. A production privacy policy will be
-            added when accounts and analytics are connected.
+            Price alerts are stored on our server under the email you provide,
+            so they follow you to any device — remove them any time from the
+            Alerts page. We also record anonymous product-page views and log
+            outbound clicks to retailers (including browser and referrer
+            details) to measure whether our comparisons lead to purchases. No
+            accounts or cookies are used. A full privacy policy will be added
+            when accounts are connected.
           </p>
         </section>
         <section id="terms" className="card p-5">

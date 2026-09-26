@@ -180,15 +180,16 @@ export async function LowestPriceSection({ product }: { product: Product }) {
               <p className="text-[40px] font-extrabold leading-none tracking-tight text-ink sm:text-[44px]">
                 {lowest ? formatPeso(lowest.price) : "—"}
               </p>
-              <p className="text-[18px] font-bold text-success">
-                ↓ {formatPeso(savings)}
-              </p>
             </div>
 
-            <span className="inline-flex w-fit items-center gap-2 rounded-full bg-success-soft px-3.5 py-2 text-[14px] font-bold text-success">
-              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              You save {formatPeso(savings)}
-            </span>
+            {/* The savings pill used to sit next to a bare "↓ ₱X" that said
+                the same thing with no words — one clear statement instead. */}
+            {savings > 0 && (
+              <span className="inline-flex w-fit items-center gap-2 rounded-full bg-success-soft px-3.5 py-2 text-[14px] font-bold text-success">
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                You save {formatPeso(savings)}
+              </span>
+            )}
 
             <div>
               <h3 className="mb-3 text-[15px] font-bold text-ink">
@@ -254,25 +255,8 @@ export async function LowestPriceSection({ product }: { product: Product }) {
               source={series.source}
               compact
             />
-            <div className={`flex items-start gap-3 rounded-2xl border px-4 py-4 ${tone.panel}`}>
-              <span
-                className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${tone.badge}`}
-              >
-                <TimingIcon className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <div>
-                <p className={`text-[15px] font-bold ${tone.title}`}>{timing.label}</p>
-                <p className="text-[14px] leading-snug text-ink-2">
-                  {timing.insufficient
-                    ? "We need more recorded price observations before we can compare this price with its usual range."
-                    : Math.abs(timing.percentVsAverage) > 0
-                      ? `This price is ${Math.abs(timing.percentVsAverage)}% ${
-                          timing.percentVsAverage < 0 ? "lower" : "higher"
-                        } than its recent average.`
-                      : "This price is in line with its recent average."}
-                </p>
-              </div>
-            </div>
+            {/* The verdict already sits at the top of the price card — a
+                second copy under the chart said the same thing twice. */}
           </div>
         </div>
       </div>

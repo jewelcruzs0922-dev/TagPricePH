@@ -65,6 +65,16 @@ export function SearchResults({
   const requestId = useRef(0);
   const skipFirstFetch = useRef(true);
   const pageRef = useRef(1);
+  /** The in-flight "Show more" request, so a filter change or an unmount can
+   *  cancel it instead of letting a stale page download into nothing. */
+  const loadMoreAbort = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      loadMoreAbort.current?.abort();
+    },
+    [],
+  );
 
   // Filters and sort are applied on the server. Each change issues one debounced
   // request; a stale response can never overwrite a newer one.
@@ -73,6 +83,9 @@ export function SearchResults({
       skipFirstFetch.current = false;
       return;
     }
+
+    loadMoreAbort.current?.abort();
+    loadMoreAbort.current = null;
 
     const id = requestId.current + 1;
     requestId.current = id;
@@ -104,6 +117,7 @@ export function SearchResults({
         .catch(() => {
           if (controller.signal.aborted || id !== requestId.current) return;
           setPhase("error");
+          setLoadingMore(false);
         });
     }, FETCH_DEBOUNCE_MS);
 
@@ -128,10 +142,13 @@ export function SearchResults({
     if (phase !== "idle" || loadingMore) return;
     const id = requestId.current + 1;
     requestId.current = id;
+    const controller = new AbortController();
+    loadMoreAbort.current = controller;
     setLoadingMore(true);
     try {
       const response = await fetch(
         buildSearchUrl(query, filters, sort, pageRef.current + 1),
+        { signal: controller.signal },
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = (await response.json()) as {
@@ -150,6 +167,7 @@ export function SearchResults({
     } catch {
       // Keep what is on screen; the button stays available to retry.
     } finally {
+      if (loadMoreAbort.current === controller) loadMoreAbort.current = null;
       if (requestId.current === id) setLoadingMore(false);
     }
   }

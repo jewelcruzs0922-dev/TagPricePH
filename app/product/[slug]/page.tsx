@@ -19,6 +19,7 @@ import { formatRelativeTime, getFreshness } from "@/lib/utils/freshness";
 import { getStore } from "@/lib/data/stores";
 import { getAffiliateUrl } from "@/lib/api/affiliate";
 import { buildMetaDescription, buildProductJsonLd, isSampleClaim } from "@/lib/trust";
+import { serializeJsonLd } from "@/lib/utils/jsonld";
 import { resolveBuyTimings, resolvePriceSeries } from "@/lib/db/observations";
 import { StoreComparison } from "@/components/comparison/StoreComparison";
 import { ProductViewTracker } from "@/components/analytics/ProductViewTracker";
@@ -148,11 +149,11 @@ export default async function ProductPage({ params }: ProductPageProps) {
     <div className="container-page py-6 sm:py-8">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(breadcrumbLd) }}
       />
       <ProductViewTracker slug={product.slug} />
 
@@ -167,7 +168,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
           <li aria-hidden="true">/</li>
           <li>
             <Link href={`/categories/${product.category}`} className="hover:text-ink">
-              {product.category.replace("-", " ")}
+              {category?.name ?? product.category.replace(/-/g, " ")}
             </Link>
           </li>
           <li aria-hidden="true">/</li>
@@ -206,11 +207,9 @@ export default async function ProductPage({ params }: ProductPageProps) {
               ({(product.reviewCount ?? 0).toLocaleString("en-PH")} reviews)
             </p>
           )}
-          {sampleShown && (
-            <p className="mt-4 text-[13px] text-ink-3">
-              Sample listing for demonstration. Images and prices are illustrative.
-            </p>
-          )}
+          {/* One sample caveat per page is enough: the note under the price
+              already says the data is not live, and repeating it here put the
+              same warning twice within a screen. */}
         </div>
 
         <div className="flex flex-col gap-4">
@@ -238,6 +237,11 @@ export default async function ProductPage({ params }: ProductPageProps) {
                 <p className="text-[40px] font-extrabold leading-none tracking-tight text-ink">
                   {lowest ? formatPeso(lowest.price) : "—"}
                 </p>
+                {lowest && (
+                  <p className="mt-1.5 text-[14px] font-semibold text-ink-2">
+                    at {getStore(lowest.storeId).name}
+                  </p>
+                )}
               </div>
               {savings > 0 && <SavingsBadge amount={savings} />}
             </div>
@@ -247,7 +251,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
                 {recordedDrop.averageDetail ? ` · ${recordedDrop.averageDetail}` : ""}
               </p>
             )}
-            <p className="mt-2 text-[13px] text-ink-3">
+            <p className="mt-2 text-[13px] text-ink-2">
               {sampleShown ? (
                 <>
                   Sample data · last updated {sampleAsOf} — not live prices

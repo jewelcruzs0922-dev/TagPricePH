@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientIp, rateLimitResponse } from "@/lib/api/request-guard";
 import { parsePage, parseSearchParams } from "@/lib/data/search-url";
 import { toClientProducts } from "@/lib/data/search-core";
 import { runSearch, SEARCH_PAGE_SIZE } from "@/lib/search/run-search";
 import { resolveBuyTimings } from "@/lib/db/observations";
+import { consumeRateLimit, type RateLimitState } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -18,9 +20,19 @@ export const dynamic = "force-dynamic";
  * where one exists, in a single batched query rather than one per card.
  *
  * Encoding and decoding both live in `lib/data/search-url.ts` so the two sides
- * cannot drift apart.
+ * cannot drift apart. A per-IP budget bounds the unauthenticated work each
+ * caller can ask for; the query itself is length-capped in the parser.
  */
+const SEARCH_LIMIT = { limit: 120, windowMs: 60_000 };
+const searchBuckets: RateLimitState = new Map();
+
 export async function GET(request: NextRequest) {
+  const limited = rateLimitResponse(
+    consumeRateLimit(searchBuckets, `search:${clientIp(request)}`, SEARCH_LIMIT),
+    "too many requests",
+  );
+  if (limited) return limited;
+
   try {
     const { q, filters, sort } = parseSearchParams(request.nextUrl.searchParams);
     const page = parsePage(request.nextUrl.searchParams);

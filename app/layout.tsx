@@ -7,7 +7,9 @@ import { baseUrl, metadataConfig } from "@/lib/utils/seo";
 import "./globals.css";
 
 const outfit = Outfit({
-  subsets: ["latin"],
+  // latin-ext carries ₱ (U+20B1): without it in `subsets`, the peso glyph
+  // loads from an unpreloaded file after swap and every price can shift.
+  subsets: ["latin", "latin-ext"],
   variable: "--font-outfit",
   display: "swap",
 });

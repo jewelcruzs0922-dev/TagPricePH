@@ -23,20 +23,13 @@ const socials = [
   { label: "YouTube", Icon: YouTubeIcon },
 ];
 
-function SocialIcon({
-  label,
-  Icon,
-}: {
-  label: string;
-  Icon: React.ComponentType<{ className?: string; size?: number }>;
-}) {
+function SocialIcon({ Icon }: { Icon: React.ComponentType<{ className?: string; size?: number }> }) {
+  // Decorative brand marks only: there are no social accounts to link to yet,
+  // so they carry no hover/tooltip affordance and are hidden from assistive
+  // tech with the rest of the group.
   return (
-    <span
-      title={label}
-      className="flex h-8 w-8 items-center justify-center rounded-full text-ink-2 transition hover:text-ink"
-    >
+    <span className="flex h-8 w-8 items-center justify-center rounded-full text-ink-2">
       <Icon className="h-[15px] w-[15px]" size={15} />
-      <span className="sr-only">{label}</span>
     </span>
   );
 }
@@ -67,11 +60,7 @@ export function SiteFooter() {
         <div className="flex flex-col items-start gap-3 md:items-end">
           <div className="flex items-center gap-1" aria-hidden="true">
             {socials.map((social) => (
-              <SocialIcon
-                key={social.label}
-                label={social.label}
-                Icon={social.Icon}
-              />
+              <SocialIcon key={social.label} Icon={social.Icon} />
             ))}
           </div>
           <p className="text-[13px] text-ink-2">
@@ -80,11 +69,11 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="border-t border-line/70">
-        <div className="container-page flex flex-col gap-1.5 py-4 text-[12px] text-ink-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="container-page flex flex-col gap-1.5 py-4 text-[12px] text-ink-2 sm:flex-row sm:items-center sm:justify-between">
           <p>© {new Date().getFullYear()} TagPricePH · Demo sample data</p>
           <p>Prices may not reflect live retailer prices.</p>
         </div>
-        <div className="container-page border-t border-line/60 py-3 text-[12px] leading-relaxed text-ink-3">
+        <div className="container-page border-t border-line/60 py-3 text-[12px] leading-relaxed text-ink-2">
           <p>
             Some links on TagPricePH are affiliate links. If you purchase through
             one of these links, TagPricePH may earn a commission at no additional

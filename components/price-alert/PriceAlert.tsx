@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { BellRing, Check, Trash2 } from "lucide-react";
 import type { PriceAlertView } from "@/lib/data/alert-events";
 import { fromCents } from "@/lib/db/money";
@@ -349,7 +350,7 @@ export function PriceAlertForm({
           <button
             type="button"
             onClick={handleRemove}
-            className="mt-2 inline-flex items-center gap-1 text-[13px] font-semibold text-ink-2 hover:text-ink"
+            className="-mx-2 mt-2 inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-[13px] font-semibold text-ink-2 hover:text-ink"
             aria-label={`Remove price alert for ${visible.productName ?? productName}`}
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -536,9 +537,9 @@ export function PriceAlertList() {
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <a href={`/product/${alert.slug}`} className="btn-ghost text-[14px]">
+                  <Link href={`/product/${alert.slug}`} className="btn-ghost text-[14px]">
                     View product
-                  </a>
+                  </Link>
                   <button
                     type="button"
                     onClick={() => void remove(alert)}

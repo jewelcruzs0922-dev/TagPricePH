@@ -19,10 +19,11 @@ export const metadata: Metadata = {
 };
 
 export default async function HomePage() {
-  const [featuredProduct, priceDrops] = await Promise.all([
+  const [featuredProduct, dropFeed] = await Promise.all([
     getFeaturedProduct(),
     getHomePriceDrops(),
   ]);
+  const priceDrops = dropFeed.products;
 
   if (!featuredProduct) {
     // No catalog to speak for. Saying so is the only honest option — a
@@ -55,11 +56,14 @@ export default async function HomePage() {
         {priceDrops.length > 0 && (
           <PriceDropsSection
             products={priceDrops}
+            recorded={dropFeed.recorded}
             sample={priceDrops.some((item) => isSampleClaim(item))}
           />
         )}
         <CategoriesSection categories={categories} />
-        <SavingsCta savings={savings} />
+        {/* Only worth shouting about when there is a real gap to claim —
+            "You could save ₱0" is noise, not a selling point. */}
+        {savings > 0 && <SavingsCta savings={savings} />}
       </div>
     </>
   );

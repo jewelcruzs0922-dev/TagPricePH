@@ -24,6 +24,23 @@ export type RateLimitVerdict = {
 /** Bound the state map: expired buckets are swept once it grows large. */
 const MAX_BUCKETS = 10_000;
 
+/**
+ * Keep the map bounded even under a flood of fresh keys: sweep what has
+ * expired, and if the map is still full, drop the oldest entries (Map keeps
+ * insertion order) rather than growing without limit.
+ */
+function makeRoom(state: RateLimitState, now: number): void {
+  if (state.size < MAX_BUCKETS) return;
+  for (const [otherKey, other] of state) {
+    if (other.resetAt <= now) state.delete(otherKey);
+  }
+  while (state.size >= MAX_BUCKETS) {
+    const oldest = state.keys().next();
+    if (oldest.done) break;
+    state.delete(oldest.value);
+  }
+}
+
 export function consumeRateLimit(
   state: RateLimitState,
   key: string,
@@ -33,11 +50,7 @@ export function consumeRateLimit(
   const bucket = state.get(key);
 
   if (!bucket || bucket.resetAt <= now) {
-    if (state.size >= MAX_BUCKETS) {
-      for (const [otherKey, other] of state) {
-        if (other.resetAt <= now) state.delete(otherKey);
-      }
-    }
+    makeRoom(state, now);
     state.set(key, { count: 1, resetAt: now + options.windowMs });
     return { allowed: true, retryAfterSeconds: 0 };
   }
@@ -51,4 +64,50 @@ export function consumeRateLimit(
 
   bucket.count += 1;
   return { allowed: true, retryAfterSeconds: 0 };
+}
+
+/**
+ * Failure-counting budgets for secret-verifying endpoints (admin login,
+ * ingest, cron). Unlike consumeRateLimit these do not charge for every
+ * request — a legitimate caller who succeeds never accumulates anything —
+ * so the limit only bites on repeated wrong secrets: check the budget before
+ * verifying, record a failure on a mismatch, and clear the key on success.
+ */
+export function failureBudgetVerdict(
+  state: RateLimitState,
+  key: string,
+  options: { limit: number; windowMs: number },
+  now: number = Date.now(),
+): RateLimitVerdict {
+  const bucket = state.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  if (bucket.count >= options.limit) {
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+    };
+  }
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
+export function recordFailure(
+  state: RateLimitState,
+  key: string,
+  options: { limit: number; windowMs: number },
+  now: number = Date.now(),
+): void {
+  const bucket = state.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    makeRoom(state, now);
+    state.set(key, { count: 1, resetAt: now + options.windowMs });
+    return;
+  }
+  bucket.count += 1;
+}
+
+/** A correct secret wipes the budget so real callers never lock themselves out. */
+export function clearFailures(state: RateLimitState, key: string): void {
+  state.delete(key);
 }

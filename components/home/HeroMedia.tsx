@@ -66,7 +66,7 @@ export function HeroMedia() {
               alt={slide.alt}
               width={slide.width}
               height={slide.height}
-              quality={100}
+              quality={75}
               priority={slideIndex === 0}
               sizes="(min-width: 1024px) 560px, (min-width: 640px) 90vw, 100vw"
               className="h-full w-full object-contain"

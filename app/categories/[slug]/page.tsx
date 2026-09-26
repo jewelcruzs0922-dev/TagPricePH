@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { categories, getCategory } from "@/lib/data/categories";
 import { getCategoryProducts } from "@/lib/data/catalog";
 import { baseUrl } from "@/lib/utils/seo";
+import { serializeJsonLd } from "@/lib/utils/jsonld";
 import { ProductCard } from "@/components/products/ProductCard";
 import { resolveBuyTimings } from "@/lib/db/observations";
 import { isSampleClaim } from "@/lib/trust";
@@ -71,7 +72,7 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
     <div className="container-page py-8 sm:py-10">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(breadcrumbLd) }}
       />
       <nav aria-label="Breadcrumb" className="mb-5">
         <Link
@@ -89,7 +90,7 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
         </h1>
         <p className="mt-1 text-[16px] text-ink-2">{category.blurb}</p>
         {sampleShown && (
-          <p className="mt-2 text-[13px] text-ink-3">
+          <p className="mt-2 text-[13px] text-ink-2">
             Sample data — prices shown are illustrative, not live retailer prices.
           </p>
         )}

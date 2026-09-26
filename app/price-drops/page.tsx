@@ -49,6 +49,7 @@ export default async function PriceDropsPage() {
               key={product.id}
               product={product}
               recorded={feed.recorded.get(product.slug)}
+              titleLevel="h2"
             />
           ))}
         </div>
@@ -67,7 +68,7 @@ export default async function PriceDropsPage() {
           ) : (
             <>
               We compare the current lowest offer with the product&apos;s previous reference
-              price. These are demonstration figures, not recorded observations. Always
+              price — a sample figure, not a recorded observation. Always
               confirm the final price on the retailer&apos;s site.
             </>
           )}

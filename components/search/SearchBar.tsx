@@ -14,6 +14,10 @@ type SearchBarProps = {
   autoFocus?: boolean;
   size?: "lg" | "md";
   className?: string;
+  /** Seeds the box with the query already being shown — the results page
+   *  needs this, otherwise the shopper sees results for a query they can no
+   *  longer see, edit, or re-run. */
+  initialQuery?: string;
 };
 
 /** Long enough that a fast typist produces one request, not one per letter. */
@@ -24,9 +28,10 @@ export function SearchBar({
   autoFocus = false,
   size = "lg",
   className = "",
+  initialQuery = "",
 }: SearchBarProps) {
   const router = useRouter();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -49,7 +54,7 @@ export function SearchBar({
    */
   useEffect(() => {
     const trimmed = query.trim();
-    if (pasted || !trimmed) return;
+    if (pasted || !trimmed || !open) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       fetch(`/api/suggestions?q=${encodeURIComponent(trimmed)}`, {
@@ -68,7 +73,7 @@ export function SearchBar({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [query, pasted]);
+  }, [query, pasted, open]);
 
   useEffect(() => {
     function onClickOutside(event: MouseEvent) {
@@ -134,7 +139,7 @@ export function SearchBar({
           autoFocus={autoFocus}
           autoComplete="off"
           placeholder={placeholder}
-          className={`w-full rounded-full border border-line bg-white text-ink placeholder:text-ink-3 shadow-[0_2px_12px_rgba(23,32,51,0.04)] transition focus:border-accent-deep focus:outline-none focus:ring-4 focus:ring-accent/45 ${inputSize}`}
+          className={`w-full rounded-full border border-line bg-white text-ink placeholder:text-ink-3 shadow-[0_2px_12px_rgba(23,32,51,0.04)] transition focus:border-accent-deep focus:ring-4 focus:ring-accent/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink ${inputSize}`}
           onChange={(event) => {
             setQuery(event.target.value);
             setOpen(true);
@@ -142,7 +147,9 @@ export function SearchBar({
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          aria-controls="search-suggestions"
+          role="combobox"
+          aria-controls={showPanel ? "search-suggestions" : undefined}
+          aria-expanded={showPanel}
           aria-autocomplete="list"
         />
         <button

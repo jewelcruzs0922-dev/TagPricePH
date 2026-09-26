@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getActiveProvider } from "@/lib/api/registry";
 import {
+  clientIp,
+  rateLimitResponse,
+  rejectUnsafeJsonPost,
+} from "@/lib/api/request-guard";
+import {
   parseAlertEmail,
   parseAlertId,
   parseAlertRequest,
@@ -21,6 +26,7 @@ import { toCents } from "@/lib/db/money";
 import { logEvent } from "@/lib/log";
 import { getLowestOffer } from "@/lib/pricing";
 import { consumeRateLimit, type RateLimitState } from "@/lib/rate-limit";
+import { timingSafeStringEqual } from "@/lib/security/timing-safe";
 import type { Product } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -61,12 +67,6 @@ const postBuckets: RateLimitState = new Map();
 
 type AlertView = PriceAlertView;
 
-function clientIp(request: NextRequest): string {
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0]?.trim() || "unknown";
-  return request.headers.get("x-real-ip") || "unknown";
-}
-
 function currentPriceCents(product: Product | null): number | null {
   if (!product) return null;
   const lowest = getLowestOffer(product.offers);
@@ -105,7 +105,10 @@ export async function GET(request: NextRequest) {
   // rows answers with an empty list, because there is nothing to protect and
   // no token could exist yet.
   const mailboxToken = await getMailboxToken(email);
-  if (mailboxToken !== null && request.headers.get(TOKEN_HEADER) !== mailboxToken) {
+  if (
+    mailboxToken !== null &&
+    !timingSafeStringEqual(request.headers.get(TOKEN_HEADER), mailboxToken)
+  ) {
     return NextResponse.json(
       { error: "a valid alert token is required" },
       { status: 403 },
@@ -156,6 +159,9 @@ export async function GET(request: NextRequest) {
 
 /** File an alert for a product that actually exists in the catalog. */
 export async function POST(request: NextRequest) {
+  const rejected = rejectUnsafeJsonPost(request);
+  if (rejected) return rejected;
+
   let payload: unknown;
   try {
     payload = await request.json();
@@ -168,13 +174,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid alert" }, { status: 400 });
   }
 
-  const verdict = consumeRateLimit(postBuckets, `alerts:${clientIp(request)}`, POST_LIMIT);
-  if (!verdict.allowed) {
-    return NextResponse.json(
-      { error: "too many alerts — wait a moment" },
-      { status: 429, headers: { "Retry-After": String(verdict.retryAfterSeconds) } },
-    );
-  }
+  const limited = rateLimitResponse(
+    consumeRateLimit(postBuckets, `alerts:${clientIp(request)}`, POST_LIMIT),
+    "too many alerts — wait a moment",
+  );
+  if (limited) return limited;
 
   try {
     const product = await getActiveProvider().getProduct(alert.productSlug);
@@ -187,7 +191,7 @@ export async function POST(request: NextRequest) {
     const existingToken = await getMailboxToken(alert.email);
     let accessToken: string;
     if (existingToken !== null) {
-      if (request.headers.get(TOKEN_HEADER) !== existingToken) {
+      if (!timingSafeStringEqual(request.headers.get(TOKEN_HEADER), existingToken)) {
         return NextResponse.json(
           { error: "a valid alert token is required" },
           { status: 403 },
@@ -206,7 +210,10 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({
       alert: toView(row, product, currentPriceCents(product)),
-      accessToken,
+      // The token as INSERT returned it — under a concurrent first POST the
+      // conflict path keeps the stored token, and a locally minted copy could
+      // silently differ, handing this caller a token that opens nothing.
+      accessToken: row.access_token,
     });
   } catch (error) {
     logEvent("error", "alerts.create-failed", {
@@ -234,7 +241,7 @@ export async function DELETE(request: NextRequest) {
     if (!owner || owner.email !== email) {
       return NextResponse.json({ error: "alert not found" }, { status: 404 });
     }
-    if (owner.access_token !== request.headers.get(TOKEN_HEADER)) {
+    if (!timingSafeStringEqual(request.headers.get(TOKEN_HEADER), owner.access_token)) {
       return NextResponse.json(
         { error: "a valid alert token is required" },
         { status: 403 },

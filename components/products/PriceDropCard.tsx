@@ -12,19 +12,25 @@ type PriceDropCardProps = {
   product: Product;
   /** Set when the drop comes from recorded observations rather than the sample reference price. */
   recorded?: RecordedDrop;
+  /** Heading level for the product title — pages without an intervening h2 pass "h2"
+   *  so the document outline never skips a level. */
+  titleLevel?: "h2" | "h3";
 };
 
-export function PriceDropCard({ product, recorded }: PriceDropCardProps) {
+export function PriceDropCard({ product, recorded, titleLevel = "h3" }: PriceDropCardProps) {
   const lowest = getLowestOffer(product.offers);
   const drop = recorded?.percentageDrop ?? getPriceDropPercent(product) ?? 0;
   const storeId = lowest?.storeId ?? product.offers[0]?.storeId ?? "shopee";
+  const Title = titleLevel;
 
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-white transition hover:border-[#d9d4c4] hover:shadow-[0_8px_24px_rgba(23,32,51,0.06)]">
       <div className="relative h-48 overflow-hidden bg-[#F6F4EC]">
-        <span className="absolute left-3 top-3 z-10 rounded-lg bg-accent px-2.5 py-1 text-[12px] font-bold text-ink">
-          -{drop}%
-        </span>
+        {drop > 0 && (
+          <span className="absolute left-3 top-3 z-10 rounded-lg bg-accent px-2.5 py-1 text-[12px] font-bold text-ink">
+            -{drop}%
+          </span>
+        )}
         <Image
           src={product.image}
           alt={product.name}
@@ -35,18 +41,19 @@ export function PriceDropCard({ product, recorded }: PriceDropCardProps) {
       </div>
 
       <div className="flex flex-1 flex-col gap-2.5 p-4">
-        <h3 className="line-clamp-2 min-h-[42px] text-[15px] font-semibold leading-snug text-ink">
+        <Title className="line-clamp-2 min-h-[42px] text-[15px] font-semibold leading-snug text-ink">
           <Link href={`/product/${product.slug}`} className="hover:underline">
             {product.name}
           </Link>
-        </h3>
+        </Title>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <p className="text-[22px] font-extrabold tracking-tight text-ink">
             {lowest ? formatPeso(lowest.price) : "—"}
           </p>
           {!recorded && isSampleClaim(product) && product.previousPrice && (
-            <p className="text-[14px] text-ink-3 line-through">
-              {formatPeso(product.previousPrice)}
+            <p className="text-[14px] text-ink-2">
+              was{" "}
+              <span className="line-through">{formatPeso(product.previousPrice)}</span>
             </p>
           )}
         </div>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getActiveProvider, getRegisteredProviderIds } from "@/lib/api/registry";
+import { clientIp, rateLimitResponse } from "@/lib/api/request-guard";
 import { planIngestion, providerRefusal, rowKey, screenRows } from "@/lib/data/ingest";
 import { query } from "@/lib/db";
 import { syncCatalog } from "@/lib/db/catalog-sync";
@@ -7,6 +8,13 @@ import { fromCents } from "@/lib/db/money";
 import { recordObservations } from "@/lib/db/observations";
 import { LAST_PRICES_SQL } from "@/lib/db/observation-queries";
 import { logEvent } from "@/lib/log";
+import {
+  clearFailures,
+  failureBudgetVerdict,
+  recordFailure,
+  type RateLimitState,
+} from "@/lib/rate-limit";
+import { timingSafeStringEqual } from "@/lib/security/timing-safe";
 
 export const dynamic = "force-dynamic";
 
@@ -33,23 +41,34 @@ const NO_STORE = { "Cache-Control": "no-store" };
  */
 function matchesSecret(request: NextRequest, secret: string): boolean {
   const header = request.headers.get("x-ingest-secret");
-  if (header && header === secret) return true;
+  if (header && timingSafeStringEqual(header, secret)) return true;
 
   const authorization = request.headers.get("authorization");
   if (authorization?.startsWith("Bearer ")) {
-    return authorization.slice("Bearer ".length) === secret;
+    return timingSafeStringEqual(authorization.slice("Bearer ".length), secret);
   }
   return false;
 }
+
+/** Wrong secrets count against a per-IP budget; a right one clears it. */
+const AUTH_LIMIT = { limit: 10, windowMs: 60_000 };
+const authFailures: RateLimitState = new Map();
 
 async function ingest(request: NextRequest) {
   const secret = process.env.INGEST_SECRET;
   if (!secret) {
     return NextResponse.json({ error: "not found" }, { status: 404, headers: NO_STORE });
   }
+  const key = `ingest:${clientIp(request)}`;
+  const budget = failureBudgetVerdict(authFailures, key, AUTH_LIMIT);
+  if (!budget.allowed) {
+    return rateLimitResponse(budget, "too many attempts")!;
+  }
   if (!matchesSecret(request, secret)) {
+    recordFailure(authFailures, key, AUTH_LIMIT);
     return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: NO_STORE });
   }
+  clearFailures(authFailures, key);
 
   try {
     let provider;

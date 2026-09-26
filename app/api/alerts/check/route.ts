@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getActiveProvider } from "@/lib/api/registry";
+import { clientIp, rateLimitResponse } from "@/lib/api/request-guard";
 import { shouldTriggerAlert } from "@/lib/data/alert-events";
 import { listActiveAlerts, triggerAlert } from "@/lib/db/alerts";
 import { toCents } from "@/lib/db/money";
 import { logEvent } from "@/lib/log";
+import {
+  clearFailures,
+  failureBudgetVerdict,
+  recordFailure,
+  type RateLimitState,
+} from "@/lib/rate-limit";
 import { getLowestOffer } from "@/lib/pricing";
+import { timingSafeStringEqual } from "@/lib/security/timing-safe";
 
 export const dynamic = "force-dynamic";
 
@@ -22,18 +30,30 @@ export const dynamic = "force-dynamic";
  * and with one configured, only `Authorization: Bearer <secret>` may call it
  * (401 otherwise). There is deliberately no "open in development" branch: a
  * check run writes to the database, and an environment variable flip should
- * never be what decides whether writes are exposed.
+ * never be what decides whether writes are exposed. The bearer comparison is
+ * constant-time, and repeated wrong bearers count against a per-IP failure
+ * budget so the secret cannot be guessed at volume.
  */
+const AUTH_LIMIT = { limit: 10, windowMs: 60_000 };
+const authFailures: RateLimitState = new Map();
+
 export async function POST(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret) {
     logEvent("warn", "alerts.cron.disabled", {});
     return NextResponse.json({ error: "cron check disabled" }, { status: 503 });
   }
-  if (request.headers.get("authorization") !== `Bearer ${secret}`) {
+  const key = `cron-check:${clientIp(request)}`;
+  const budget = failureBudgetVerdict(authFailures, key, AUTH_LIMIT);
+  if (!budget.allowed) {
+    return rateLimitResponse(budget, "too many attempts")!;
+  }
+  if (!timingSafeStringEqual(request.headers.get("authorization"), `Bearer ${secret}`)) {
+    recordFailure(authFailures, key, AUTH_LIMIT);
     logEvent("warn", "alerts.cron.denied", {});
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  clearFailures(authFailures, key);
 
   try {
     const alerts = await listActiveAlerts();
