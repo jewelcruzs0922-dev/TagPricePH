@@ -8,6 +8,16 @@
  * Each instance counts for itself; that weakness is documented rather than
  * hidden behind a cache that does not exist.
  *
+ * Current coverage (Live Data Readiness §10): /api/search, /api/suggestions,
+ * /api/views, alert filing, /api/admin/session, ingest auth, cron auth, and
+ * /go — plus the failure budgets in this file for the secret endpoints. All
+ * are instance-local, which is honest at this scale: one deployment, modest
+ * traffic. A shared store (Redis or similar) becomes worth its complexity
+ * only when multiple instances must share ONE budget for the same key —
+ * i.e. when login-lockout or ingest-lockout can be walked around by landing
+ * on a different instance. Until then, adding distributed state would be
+ * complexity without a business reason.
+ *
  * The state map is owned by the caller (the route module), and `now` is a
  * parameter so verification can drive the window from plain Node without
  * sleeping — the same testability rule the rest of the codebase follows.

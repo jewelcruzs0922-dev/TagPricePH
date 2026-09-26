@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { getActiveProvider } from "@/lib/api/registry";
 import { resolveOutboundUrl } from "@/lib/api/affiliate";
+import { clientIp, rateLimitResponse } from "@/lib/api/request-guard";
 import { isEligibleCurrentOffer } from "@/lib/pricing";
 import { recordClick } from "@/lib/db/clicks";
 import { logEvent } from "@/lib/log";
+import { consumeRateLimit, type RateLimitState } from "@/lib/rate-limit";
+
+/** Per-IP budget for outbound clicks: humans click rarely, crawlers and
+ * abusers do not — and every hit is a catalog read behind it. */
+const GO_LIMIT = { limit: 120, windowMs: 60_000 };
+const goBuckets: RateLimitState = new Map();
 
 type RouteContext = {
   params: Promise<{ store: string; product: string }>;
@@ -30,6 +37,15 @@ type RouteContext = {
  */
 export async function GET(request: NextRequest, context: RouteContext) {
   const { store: storeId, product: productSlug } = await context.params;
+
+  // Checked before any catalog read: an over-budget address gets a 429
+  // instead of a redirect, so /go cannot be used to hammer the database.
+  const limited = rateLimitResponse(
+    consumeRateLimit(goBuckets, `go:${clientIp(request)}`, GO_LIMIT),
+    "too many clicks — wait a moment",
+  );
+  if (limited) return limited;
+
   const product = await getActiveProvider().getProduct(productSlug);
 
   if (!product) {

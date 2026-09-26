@@ -138,6 +138,7 @@ async function main() {
     await client.query(INSERT_OBSERVATIONS_SQL, [
       rows.map((row) => row.slug),
       rows.map((row) => row.store),
+      rows.map(() => ""),
       rows.map((row) => toCents(row.price)),
       rows.map((row) => row.availability),
       rows.map((row) => row.source),

@@ -51,13 +51,27 @@ function formatSampleDate(product: Product): string {
 }
 
 /**
- * Every product is enumerated at build time, so an unknown slug is not a
- * product — it is a 404. Without this, the segment's `loading.tsx` streams a
- * 200 header before `notFound()` can throw, and Google indexes a soft 404.
+ * Freshness contract (Live Data Readiness §2):
  *
- * Revisit when a live provider can introduce products after build.
+ * - ISR with a 60-second window: a price updated in the database is on the
+ *   public page within a minute of the next visit, with no deployment. Every
+ *   product is still prerendered at build (fast first hit, crawlable HTML),
+ *   and `generateStaticParams` stays for the same reason.
+ * - `dynamicParams` defaults to true, so a product introduced by an
+ *   authorized ingestion job after build resolves on demand instead of
+ *   404-ing until the next deploy.
+ * - An *unknown* slug answers with a real HTTP 404: `notFound()` fires in
+ *   `generateMetadata` / the page before anything streams. This segment has
+ *   NO `loading.tsx` on purpose — a file-based loading boundary streams its
+ *   fallback (and with it a committed 200) before `notFound()` can throw,
+ *   which is exactly the soft-404 the old `dynamicParams = false` guard
+ *   existed to prevent. Do not add one back without another way to keep the
+ *   status honest.
+ * - After ingestion, `app/api/ingest/route.ts` revalidates the affected
+ *   paths explicitly (on-demand), so a live provider's writes show up
+ *   immediately rather than waiting out the window.
  */
-export const dynamicParams = false;
+export const revalidate = 60;
 
 export async function generateStaticParams() {
   const products = await getActiveProvider().listProducts();
@@ -67,7 +81,9 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
   const { slug } = await params;
   const product = await getActiveProvider().getProduct(slug);
-  if (!product) return { title: "Product not found" };
+  // A hard 404 for a slug that does not exist — including one introduced
+  // after build, which now renders on demand (see `revalidate` above).
+  if (!product) notFound();
   const lowest = getLowestOffer(product.offers);
   const description = buildMetaDescription(product, lowest?.price ?? null);
   const title = `${product.name} Price Philippines — TagPricePH`;
@@ -333,7 +349,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
         <h2 id="worth-heading" className="text-[20px] font-extrabold text-ink">
           Is it worth buying now?
         </h2>
-        {series.source !== "live" && (
+        {series.source !== "live" && series.points.length > 0 && (
           <p className="mt-1 text-[13px] text-ink-2">
             Sample verdict — drawn from demonstration history, not recorded
             retailer prices.

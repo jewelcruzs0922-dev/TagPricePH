@@ -11,6 +11,7 @@ import {
   PRODUCT_SERIES_FOR_SLUGS_SQL,
   PRODUCT_SERIES_SQL,
 } from "@/lib/db/observation-queries";
+import { getDataSource } from "@/lib/data/observations";
 
 /**
  * The observation store — the only place price history is *recorded* rather
@@ -32,6 +33,13 @@ import {
 export type ObservationInput = {
   productSlug: string;
   storeId: string;
+  /**
+   * The listing this reading came from — the marketplace's external id
+   * (lib/data/listing-id.ts), or "" when no listing is known. Part of the
+   * row's identity since migration 0013: two sellers of one product on one
+   * marketplace are two observations, even at the same instant.
+   */
+  listingExternalId?: string;
   /** Price in pesos, matching the rest of the app. */
   price: number;
   /** ISO timestamp of when the price was actually observed. */
@@ -60,6 +68,7 @@ export async function recordObservations(
   await query(INSERT_OBSERVATIONS_SQL, [
     inputs.map((item) => item.productSlug),
     inputs.map((item) => item.storeId),
+    inputs.map((item) => item.listingExternalId ?? ""),
     inputs.map((item) => toCents(item.price)),
     inputs.map((item) => item.availability ?? "in_stock"),
     inputs.map((item) => item.source),
@@ -74,13 +83,19 @@ export async function recordObservations(
  * The series claims `live` only if every observation behind it is live — one
  * generated reading among real ones would taint the whole line, and
  * overstating the basis is the one direction this system must never err in.
+ *
+ * `allowDemo` decides whether the seed catalog's generated rows are visible
+ * at all (Live Data Readiness §5): a live product reads only live readings,
+ * so a failed or absent recording shows as *no history*, never as demo
+ * history. Demo products keep reading everything, as before.
  */
 export async function getProductSeries(
   productSlug: string,
+  allowDemo: boolean = true,
 ): Promise<PriceSeries | null> {
   const rows = await query<{ date: string; price_cents: number; all_live: boolean }>(
     PRODUCT_SERIES_SQL,
-    [productSlug],
+    [productSlug, allowDemo],
   );
 
   if (rows.length === 0) return null;
@@ -94,21 +109,32 @@ export async function getProductSeries(
   };
 }
 
+/** The empty series a live product answers with when nothing real is recorded. */
+const EMPTY_SERIES: PriceSeries = { points: [], source: "demo" };
+
 /**
  * The series a page should render.
  *
  * Recorded observations win outright when they exist: splicing generated
  * history onto the end of a real series would produce a line whose basis
  * changes half way along. When nothing is recorded — or the database is
- * unreachable — the catalog series is returned still tagged with its own
- * source, so the chart keeps labelling itself honestly either way.
+ * unreachable — a DEMO product falls back to the catalog series, still tagged
+ * with its own source, so the chart keeps labelling itself honestly either way.
+ *
+ * A LIVE product never takes that fallback (Live Data Readiness §5): its
+ * generated catalog history is fiction, and fiction beside real current prices
+ * is exactly the fake trend this module exists to prevent. It answers with an
+ * empty series instead — "no recorded history" — and every surface downstream
+ * (chart, verdict, recorded drop) already refuses to claim anything from an
+ * empty line.
  *
  * Deliberately fails soft: an unavailable database must degrade a page, never
  * take down the build or the route that depends on it.
  */
 export async function resolvePriceSeries(product: Product): Promise<PriceSeries> {
+  const live = getDataSource(product) === "live";
   try {
-    const recorded = await getProductSeries(product.slug);
+    const recorded = await getProductSeries(product.slug, !live);
     if (recorded && recorded.points.length > 0) return recorded;
   } catch (error) {
     console.error(
@@ -116,6 +142,7 @@ export async function resolvePriceSeries(product: Product): Promise<PriceSeries>
       error instanceof Error ? error.message : error,
     );
   }
+  if (live) return { ...EMPTY_SERIES };
   return getPriceSeries(product);
 }
 
@@ -124,8 +151,11 @@ export async function resolvePriceSeries(product: Product): Promise<PriceSeries>
  *
  * Only slugs with recorded observations appear in the map — callers fall back
  * to the catalog series for the rest, exactly as `resolvePriceSeries` does for
- * a single product. Fails soft for the same reason: an unavailable database
- * must degrade a list, never take down the page that renders it.
+ * a single product. Demo rows are passed only for slugs that are allowed to
+ * read them (anything not fully live), so one statement serves a mixed list
+ * while live products stay clear of the seed history (Live Data Readiness §5).
+ * Fails soft for the same reason: an unavailable database must degrade a
+ * list, never take down the page that renders it.
  */
 export async function resolvePriceSeriesFor(
   products: readonly Product[],
@@ -133,6 +163,9 @@ export async function resolvePriceSeriesFor(
   const series = new Map<string, PriceSeries>();
   const slugs = [...new Set(products.map((product) => product.slug))];
   if (slugs.length === 0) return series;
+  const demoAllowed = products
+    .filter((product) => getDataSource(product) !== "live")
+    .map((product) => product.slug);
 
   try {
     const rows = await query<{
@@ -140,7 +173,7 @@ export async function resolvePriceSeriesFor(
       date: string;
       price_cents: number;
       all_live: boolean;
-    }>(PRODUCT_SERIES_FOR_SLUGS_SQL, [slugs]);
+    }>(PRODUCT_SERIES_FOR_SLUGS_SQL, [slugs, demoAllowed]);
 
     for (const row of rows) {
       const existing = series.get(row.product_slug);

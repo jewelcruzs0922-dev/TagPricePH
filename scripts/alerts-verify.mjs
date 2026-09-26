@@ -33,6 +33,7 @@ import {
   LIST_ALERTS_SQL,
   TRIGGER_ALERT_SQL,
 } from "../lib/db/alert-queries.ts";
+import { alertTokenMatches, hashAlertToken } from "../lib/security/alert-token.ts";
 
 const { Client } = pg;
 
@@ -278,6 +279,39 @@ async function main() {
         "no test alert is left active",
         !active.some((row) => row.id === first.id || row.id === rearmed.id),
         `${active.length} active overall`,
+      );
+
+      console.log("\nMailbox token hashing (Live Data Readiness §6)");
+      const SECRET = "verify-plaintext-token-9f31";
+      const digest = hashAlertToken(SECRET);
+      check(
+        "a stored token is a sha256 digest, never the plaintext",
+        digest.startsWith("sha256:") && digest.length === "sha256:".length + 64 && digest !== SECRET,
+        digest,
+      );
+      check(
+        "the presented token matches its digest",
+        alertTokenMatches(SECRET, digest),
+      );
+      check(
+        "a different token does not match the digest",
+        !alertTokenMatches("wrong-token", digest),
+      );
+      check(
+        "a legacy plaintext row still matches (pre-0014 compatibility)",
+        alertTokenMatches(SECRET, SECRET),
+      );
+      check(
+        "a missing side is never authorization",
+        !alertTokenMatches(null, digest) && !alertTokenMatches(SECRET, null),
+      );
+      const hashedRow = (
+        await client.query(INSERT_ALERT_SQL, [TEST_SLUG, 1234500, TEST_EMAIL, digest])
+      ).rows[0];
+      check(
+        "the row stores the digest exactly as written, not the plaintext",
+        hashedRow.access_token === digest && hashedRow.access_token !== SECRET,
+        String(hashedRow.access_token ?? "null"),
       );
 
       console.log("\nCleanup");

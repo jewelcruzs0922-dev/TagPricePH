@@ -8,6 +8,11 @@
  */
 import type { DataSource, Product, StoreOffer } from "@/lib/types";
 import { fromCents, toCents } from "./money.ts";
+import { deriveExternalId } from "../data/listing-id.ts";
+
+// One definition of the listing-id rule (lib/data/listing-id.ts), re-exported
+// here for existing callers that load this module directly.
+export { deriveExternalId };
 
 /* --------------------------------- writes -------------------------------- */
 
@@ -187,6 +192,17 @@ export const OFFERS_FOR_SLUG_SQL = `
  *
  * Identifier matching is exact on purpose: `%49712%` would happily match a
  * different barcode. User input is escaped so `%`/`_` are literals.
+ *
+ * Scale posture (Live Data Readiness §11): the input is already capped at
+ * 300 chars before it reaches here (lib/data/search-url.ts), every value is
+ * bound as a parameter, and the candidate set is capped at 200 rows — an
+ * unbounded scan is not possible. Indexed equality covers sku/model/GTIN
+ * (migration 0011). ILIKE '%word%' cannot use a btree, so the LIKE scan over
+ * `products` is the piece that eventually changes: when the catalog outgrows
+ * a sub-millisecond sequential scan (tens of thousands of rows and rising
+ * p95), the move is pg_trgm GIN indexes over the same patterns (or
+ * full-text `websearch_to_tsquery`), not Elasticsearch — one index, same
+ * statement shape, no new infrastructure.
  */
 export const CATALOG_SEARCH_SQL = `
   SELECT * FROM products
@@ -270,16 +286,6 @@ export type CatalogSeriesRow = {
   date: string;
   price_cents: number;
 };
-
-/**
- * The marketplace's listing id out of a URL, or the deterministic surrogate
- * when the URL carries no path (store-homepage links). Mirrors the SQL rule
- * in migration 0007: strip scheme+host; empty → `slug:store`.
- */
-export function deriveExternalId(url: string, slug: string, storeId: string): string {
-  const path = url.replace(/^https?:\/\/[^/]+/i, "");
-  return path === "" ? `${slug}:${storeId}` : path;
-}
 
 /* ------------------------------ row builders ------------------------------ */
 

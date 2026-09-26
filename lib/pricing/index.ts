@@ -191,12 +191,18 @@ function describeWindow(points: PricePoint[]): string {
 /**
  * @param history Optional series to judge against. Defaults to the product's
  *                catalog history; callers holding recorded observations pass
- *                theirs in so the verdict describes real data.
+ *                theirs in so the verdict describes real data. A LIVE product
+ *                gets no default at all (Live Data Readiness §5): its catalog
+ *                history is generated, and a verdict computed from fiction
+ *                beside live prices is the fake trend this engine refuses to
+ *                make — an empty series just reads "not enough history".
  */
 export function evaluateBuyTiming(product: Product, history?: PricePoint[]): BuyTiming {
   const lowest = getLowestOffer(product.offers);
   const current = lowest?.price ?? 0;
-  const points = history ?? getPriceSeries(product).points;
+  const points =
+    history ??
+    (getDataSource(product) === "live" ? [] : getPriceSeries(product).points);
 
   // No eligible offer means there is no current price to judge. A verdict
   // computed against 0 would read "100% below average" — the most flattering

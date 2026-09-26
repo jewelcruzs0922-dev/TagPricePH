@@ -76,9 +76,15 @@ export const dbProvider: MarketplaceProvider = {
     const [row] = await query<CatalogProductRow>(PRODUCT_BY_SLUG_SQL, [slug]);
     if (!row) return null;
 
-    const [offerRows, seriesRows] = await Promise.all([
-      query<CatalogOfferRow>(OFFERS_FOR_SLUG_SQL, [slug]),
-      query<CatalogSeriesRow>(PRODUCT_SERIES_SQL, [slug]),
+    // The series read needs the offer sources first: a live product must not
+    // read the seed catalog's demo rows (Live Data Readiness §5), so the
+    // allow_demo flag comes from THIS product's offers.
+    const offerRows = await query<CatalogOfferRow>(OFFERS_FOR_SLUG_SQL, [slug]);
+    const live =
+      offerRows.length > 0 && offerRows.every((offer) => offer.source === "live");
+    const seriesRows = await query<CatalogSeriesRow>(PRODUCT_SERIES_SQL, [
+      slug,
+      !live,
     ]);
     return assembleProduct(row, offerRows, seriesRows);
   },
@@ -99,12 +105,22 @@ async function withRelatedData(rows: CatalogProductRow[]): Promise<Product[]> {
   if (rows.length === 0) return [];
   const slugs = rows.map((row) => row.slug);
 
-  const [offerRows, seriesRows] = await Promise.all([
-    query<CatalogOfferRow>(OFFERS_FOR_SLUGS_SQL, [slugs]),
-    query<CatalogSeriesRow>(PRODUCT_SERIES_FOR_SLUGS_SQL, [slugs]),
-  ]);
-
+  const offerRows = await query<CatalogOfferRow>(OFFERS_FOR_SLUGS_SQL, [slugs]);
   const offersBy = groupBy(offerRows, (row) => row.product_slug);
+
+  // Demo rows are visible only to products that are not fully live (Live
+  // Data Readiness §5) — one flag set for the whole batch, still one query.
+  const demoAllowed = rows
+    .filter((row) => {
+      const offers = offersBy.get(row.slug) ?? [];
+      return !(offers.length > 0 && offers.every((offer) => offer.source === "live"));
+    })
+    .map((row) => row.slug);
+  const seriesRows = await query<CatalogSeriesRow>(
+    PRODUCT_SERIES_FOR_SLUGS_SQL,
+    [slugs, demoAllowed],
+  );
+
   const seriesBy = groupBy(seriesRows, (row) => row.product_slug ?? "");
 
   // Preserve SQL order (name-sorted) while attaching each product's data.

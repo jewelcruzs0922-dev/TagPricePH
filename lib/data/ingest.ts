@@ -1,4 +1,5 @@
 import type { DataSource, Product } from "@/lib/types";
+import { deriveExternalId } from "./listing-id.ts";
 
 /**
  * The ingestion contract — how a provider's readings become rows in
@@ -27,6 +28,13 @@ import type { DataSource, Product } from "@/lib/types";
 export type IngestRow = {
   productSlug: string;
   storeId: string;
+  /**
+   * The listing this reading came from — the marketplace's own external id
+   * (lib/data/listing-id.ts), "" when the provider reports no listing. Two
+   * sellers of one product on one marketplace are two different identities, so
+   * a reading is never just product+store (Live Data Readiness §3).
+   */
+  listingExternalId: string;
   /** Price in pesos, matching the rest of the app. */
   price: number;
   /** ISO timestamp of when the price was actually observed. */
@@ -91,6 +99,7 @@ export function planIngestion(
   const rows: IngestRow[] = product.offers.map((offer) => ({
     productSlug: product.slug,
     storeId: offer.storeId,
+    listingExternalId: deriveExternalId(offer.url, product.slug, offer.storeId),
     price: offer.price,
     observedAt: offer.updatedAt,
     availability: offer.inStock ? "in_stock" : "out_of_stock",
@@ -129,8 +138,12 @@ export function planIngestion(
  * what was accepted, and the caller learns exactly what was refused and why.
  *
  * Pure by design (like planIngestion): the caller supplies the last recorded
- * price per product+store, so this module never touches the database and the
- * verification script exercises exactly the code the route runs.
+ * price per listing — keyed by `rowKey`, which is product+store+listing — so
+ * this module never touches the database and the verification script exercises
+ * exactly the code the route runs. Scoping the previous price to the same
+ * listing is what stops Seller B's first reading from being judged against
+ * Seller A's last one (Live Data Readiness §4): an unseen seller starts with
+ * no baseline instead of someone else's.
  */
 export const MAX_PLAUSIBLE_CHANGE = 0.85;
 
@@ -142,8 +155,18 @@ export type RejectedIngestRow = {
   reason: string;
 };
 
-export function rowKey(productSlug: string, storeId: string): string {
-  return `${productSlug}::${storeId}`;
+/**
+ * One logical listing: product + store + that listing's external id. The
+ * separator matches the SQL key lib/db/observation-queries.ts builds, so the
+ * map keys a verification script passes and the rows the database answers
+ * are literally the same strings.
+ */
+export function rowKey(
+  productSlug: string,
+  storeId: string,
+  listingExternalId: string,
+): string {
+  return `${productSlug}::${storeId}::${listingExternalId}`;
 }
 
 export function screenRows(
@@ -175,14 +198,16 @@ export function screenRows(
       continue;
     }
 
-    const occurrence = `${rowKey(row.productSlug, row.storeId)}::${row.observedAt}`;
+    const occurrence = `${rowKey(row.productSlug, row.storeId, row.listingExternalId)}::${row.observedAt}`;
     if (seenInBatch.has(occurrence)) {
       reject(`duplicate of an earlier row for this offer at ${row.observedAt}`);
       continue;
     }
     seenInBatch.add(occurrence);
 
-    const previous = previousPrices.get(rowKey(row.productSlug, row.storeId));
+    const previous = previousPrices.get(
+      rowKey(row.productSlug, row.storeId, row.listingExternalId),
+    );
     if (previous !== undefined && previous > 0) {
       const change = Math.abs(row.price - previous) / previous;
       if (change > MAX_PLAUSIBLE_CHANGE) {

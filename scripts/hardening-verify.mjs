@@ -193,14 +193,27 @@ function sourceChecks() {
   );
   check("no page still pipes JSON.stringify into __html", rawSinks === 0);
 
+  // Every secret/token comparison stays constant-time. The alert routes go
+  // through alertTokenMatches (Live Data Readiness §6), which must itself be
+  // built on timingSafeStringEqual — so accept either spelling, but verify
+  // the helper's implementation rather than trusting its name.
+  const alertTokenHelper = readFileSync(
+    path.join(root, "lib", "security", "alert-token.ts"),
+    "utf8",
+  );
+  const helperIsConstantTime = alertTokenHelper.includes("timingSafeStringEqual");
   const secretRoutes = [
     path.join(root, "app", "api", "ingest", "route.ts"),
     path.join(root, "app", "api", "alerts", "check", "route.ts"),
     path.join(root, "app", "api", "alerts", "route.ts"),
   ];
-  const withTimingSafe = secretRoutes.filter((file) =>
-    readFileSync(file, "utf8").includes("timingSafeStringEqual"),
-  ).length;
+  const withTimingSafe = secretRoutes.filter((file) => {
+    const text = readFileSync(file, "utf8");
+    return (
+      text.includes("timingSafeStringEqual") ||
+      (text.includes("alertTokenMatches") && helperIsConstantTime)
+    );
+  }).length;
   check(
     "ingest, cron, and alert token checks use timingSafeStringEqual",
     withTimingSafe === 3,

@@ -11,6 +11,11 @@ import { categories } from "@/lib/data/categories";
 import { isSampleClaim } from "@/lib/trust";
 import { getSavings } from "@/lib/pricing";
 
+// The homepage is built from live catalog rows (featured product, drop feed,
+// prices) — 5 minutes of ISR keeps it fresh without a deploy (Live Data
+// Readiness §9), and ingestion revalidates it on write.
+export const revalidate = 300;
+
 export const metadata: Metadata = {
   title: "TagPricePH — Find the Lowest Price. Know When to Buy.",
   description:

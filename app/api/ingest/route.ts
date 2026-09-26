@@ -8,6 +8,7 @@ import { fromCents } from "@/lib/db/money";
 import { recordObservations } from "@/lib/db/observations";
 import { LAST_PRICES_SQL } from "@/lib/db/observation-queries";
 import { logEvent } from "@/lib/log";
+import { revalidatePath } from "next/cache";
 import {
   clearFailures,
   failureBudgetVerdict,
@@ -119,26 +120,48 @@ async function ingest(request: NextRequest) {
 
     // Phase 18 screening: impossible readings (non-positive, future,
     // duplicated, or beyond the plausibility limit against the last recorded
-    // price) are refused per row and reported — never written, never hidden.
-    const slugs = [...new Set(rows.map((row) => row.productSlug))];
-    const storeIds = [...new Set(rows.map((row) => row.storeId))];
+    // price FOR THE SAME LISTING) are refused per row and reported — never
+    // written, never hidden. Keys are rowKey(product, store, listing) strings,
+    // the same ones LAST_PRICES_SQL composes in SQL, so Seller B's first
+    // reading is never judged against Seller A's last one (Live Data
+    // Readiness §4) and the old slug × store cross-product pairing is gone.
+    const previousKeys = [
+      ...new Set(
+        rows.map((row) => rowKey(row.productSlug, row.storeId, row.listingExternalId)),
+      ),
+    ];
     const previousRows =
-      rows.length > 0
-        ? await query<{ product_slug: string; store_id: string; price_cents: number }>(
-            LAST_PRICES_SQL,
-            [slugs, storeIds],
-          )
+      previousKeys.length > 0
+        ? await query<{ key: string; price_cents: number }>(LAST_PRICES_SQL, [
+            previousKeys,
+          ])
         : [];
     const previous = new Map(
-      previousRows.map((row) => [
-        rowKey(row.product_slug, row.store_id),
-        fromCents(row.price_cents),
-      ]),
+      previousRows.map((row) => [row.key, fromCents(row.price_cents)]),
     );
     const { accepted, rejected } = screenRows(rows, previous);
 
     if (accepted.length > 0) {
       await recordObservations(accepted);
+    }
+
+    // Targeted revalidation (Live Data Readiness §2): the rows changed, so
+    // the pages that show them are marked stale — the affected product pages
+    // by literal path, the catalog surfaces by their own path. The next visit
+    // regenerates one page at a time; nothing here rebuilds the site, and a
+    // revalidation that fails never fails the ingestion that already landed.
+    try {
+      for (const slug of new Set(products.map((product) => product.slug))) {
+        revalidatePath(`/product/${slug}`);
+      }
+      revalidatePath("/");
+      revalidatePath("/categories/[slug]", "page");
+      revalidatePath("/price-drops");
+      revalidatePath("/sitemap.xml");
+    } catch (error) {
+      logEvent("warn", "ingest.revalidate-failed", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
 
     // One event per run: counts only — no prices, no emails, no secrets

@@ -3,6 +3,11 @@ import { listCatalog } from "@/lib/data/catalog";
 import { categories } from "@/lib/data/categories";
 import { baseUrl } from "@/lib/utils/seo";
 
+// Product URLs come from the catalog, so the sitemap must not stay frozen at
+// build: a product introduced after deployment reaches crawlers within five
+// minutes, with no rebuild (Live Data Readiness §9).
+export const revalidate = 300;
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticRoutes: MetadataRoute.Sitemap = [
     { url: `${baseUrl}/`, changeFrequency: "daily", priority: 1 },

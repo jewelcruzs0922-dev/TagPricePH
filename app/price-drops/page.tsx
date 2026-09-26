@@ -1,22 +1,42 @@
 import type { Metadata } from "next";
+import { cache } from "react";
 import { listCatalog } from "@/lib/data/catalog";
 import { buildPriceDropFeed } from "@/lib/data/price-drops";
 import { PriceDropCard } from "@/components/products/PriceDropCard";
 import { EmptyState } from "@/components/ui/States";
 
-export const metadata: Metadata = {
-  title: "Price Drops Today",
-  description:
-    "See which products dropped in price across Philippine stores — sample feed for the TagPricePH demo.",
-  alternates: { canonical: "/price-drops" },
-};
+// 5 minutes of ISR: the feed compares current prices against recorded
+// readings (Live Data Readiness §9), and ingestion revalidates it on write.
+export const revalidate = 300;
+
+/**
+ * One request-cached feed for `generateMetadata` and the page, so the SERP
+ * description and the page body always describe the same data state.
+ */
+const loadFeed = cache(async () => buildPriceDropFeed(await listCatalog()));
+
+/**
+ * The description follows the feed (Live Data Readiness §8): a deployment
+ * serving verified drops never calls itself a demo feed, and a demo catalog
+ * never claims recorded observations.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const feed = await loadFeed();
+  return {
+    title: "Price Drops Today",
+    description: feed.hasRecorded
+      ? "See which products dropped in price across Philippine stores — verified against recorded price observations."
+      : "See which products dropped in price across Philippine stores — sample feed for the TagPricePH demo.",
+    alternates: { canonical: "/price-drops" },
+  };
+}
 
 export default async function PriceDropsPage() {
   // One feed definition for this page and the homepage (lib/data/price-drops):
   // verified drops from recorded observations first, the sample catalog's
   // reference price only while the catalog itself is sample, and nothing when
   // neither supports a claim.
-  const feed = await buildPriceDropFeed(await listCatalog());
+  const feed = await loadFeed();
   const hasRecorded = feed.hasRecorded;
 
   return (

@@ -129,11 +129,14 @@ try {
   const slugs = products.map((product) => product.slug);
   await client.query(DELETE_DEMO_SERIES_SQL, [slugs]);
 
-  const series = { slug: [], store: [], price: [], availability: [], source: [], at: [], provider: [] };
+  const series = { slug: [], store: [], listing: [], price: [], availability: [], source: [], at: [], provider: [] };
   for (const product of products) {
     for (const point of product.priceHistory) {
       series.slug.push(product.slug);
       series.store.push("demo");
+      // The demo pseudo-store has no marketplace listing — '' (unattributed)
+      // is its identity, exactly as migration 0013 leaves pre-identity rows.
+      series.listing.push("");
       series.price.push(toCents(point.price));
       series.availability.push("in_stock");
       series.source.push("demo");
@@ -146,6 +149,7 @@ try {
     const slice = {
       slug: series.slug.slice(i, i + 5000),
       store: series.store.slice(i, i + 5000),
+      listing: series.listing.slice(i, i + 5000),
       price: series.price.slice(i, i + 5000),
       availability: series.availability.slice(i, i + 5000),
       source: series.source.slice(i, i + 5000),
@@ -155,6 +159,7 @@ try {
     await client.query(INSERT_OBSERVATIONS_SQL, [
       slice.slug,
       slice.store,
+      slice.listing,
       slice.price,
       slice.availability,
       slice.source,

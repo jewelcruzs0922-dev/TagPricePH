@@ -8,6 +8,14 @@ export type AffiliateContext = {
 /**
  * Hosts we are allowed to redirect to. Anything else is refused.
  * This matters the moment offer URLs stop coming from static seed data.
+ *
+ * How to extend (Live Data Readiness §7): when an affiliate network or
+ * marketplace issues redirect domains, add each host here, exactly as the
+ * marketplace registered it — scheme stays https-only, host matching stays
+ * exact (no suffix or wildcard matching), and a host is added only once it is
+ * actually authorized. Nothing outside this list can ever be redirected to,
+ * including stored affiliate URLs, so widening the list is the ONLY way a new
+ * destination becomes reachable.
  */
 export const ALLOWED_REDIRECT_HOSTS: readonly string[] = [
   "shopee.ph",

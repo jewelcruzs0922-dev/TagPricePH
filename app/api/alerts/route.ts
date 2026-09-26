@@ -13,10 +13,12 @@ import {
   type PriceAlertView,
 } from "@/lib/data/alert-events";
 import {
+  alertTokenMatches,
   cancelAlert,
   createAlert,
   getAlertOwner,
   getMailboxToken,
+  hashAlertToken,
   listAlerts,
   newAlertToken,
   triggerAlert,
@@ -26,7 +28,6 @@ import { toCents } from "@/lib/db/money";
 import { logEvent } from "@/lib/log";
 import { getLowestOffer } from "@/lib/pricing";
 import { consumeRateLimit, type RateLimitState } from "@/lib/rate-limit";
-import { timingSafeStringEqual } from "@/lib/security/timing-safe";
 import type { Product } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -105,10 +106,7 @@ export async function GET(request: NextRequest) {
   // rows answers with an empty list, because there is nothing to protect and
   // no token could exist yet.
   const mailboxToken = await getMailboxToken(email);
-  if (
-    mailboxToken !== null &&
-    !timingSafeStringEqual(request.headers.get(TOKEN_HEADER), mailboxToken)
-  ) {
+  if (mailboxToken !== null && !alertTokenMatches(request.headers.get(TOKEN_HEADER), mailboxToken)) {
     return NextResponse.json(
       { error: "a valid alert token is required" },
       { status: 403 },
@@ -187,22 +185,37 @@ export async function POST(request: NextRequest) {
     }
 
     // §25: a mailbox that already exists opens only with its token; a fresh
-    // one mints one here, which this response returns exactly once.
+    // one mints one here. The database stores the digest (Live Data
+    // Readiness §6); the plaintext travels back to this caller exactly once.
     const existingToken = await getMailboxToken(alert.email);
+    const presented = request.headers.get(TOKEN_HEADER);
     let accessToken: string;
+    let returnedToken: string;
     if (existingToken !== null) {
-      if (!timingSafeStringEqual(request.headers.get(TOKEN_HEADER), existingToken)) {
+      if (presented == null || !alertTokenMatches(presented, existingToken)) {
         return NextResponse.json(
           { error: "a valid alert token is required" },
           { status: 403 },
         );
       }
+      // The new row joins the mailbox's stored digest; the caller keeps the
+      // plaintext it just proved it holds (same value the pre-hash code
+      // echoed back from the row).
       accessToken = existingToken;
+      returnedToken = presented;
     } else {
-      accessToken = newAlertToken();
+      const minted = newAlertToken();
+      accessToken = hashAlertToken(minted);
+      returnedToken = minted;
     }
 
     const row = await createAlert({ ...alert, accessToken });
+    if (existingToken === null && !alertTokenMatches(returnedToken, row.access_token)) {
+      // Two first-POSTs for one mailbox raced; the digest on the row belongs
+      // to the other mint. Say so instead of handing back a token that
+      // silently opens nothing.
+      logEvent("warn", "alerts.mailbox-race", { slug: alert.productSlug });
+    }
     logEvent("info", "alerts.created", {
       id: row.id,
       slug: row.product_slug,
@@ -210,10 +223,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({
       alert: toView(row, product, currentPriceCents(product)),
-      // The token as INSERT returned it — under a concurrent first POST the
-      // conflict path keeps the stored token, and a locally minted copy could
-      // silently differ, handing this caller a token that opens nothing.
-      accessToken: row.access_token,
+      accessToken: returnedToken,
     });
   } catch (error) {
     logEvent("error", "alerts.create-failed", {
@@ -241,7 +251,7 @@ export async function DELETE(request: NextRequest) {
     if (!owner || owner.email !== email) {
       return NextResponse.json({ error: "alert not found" }, { status: 404 });
     }
-    if (!timingSafeStringEqual(request.headers.get(TOKEN_HEADER), owner.access_token)) {
+    if (!alertTokenMatches(request.headers.get(TOKEN_HEADER), owner.access_token)) {
       return NextResponse.json(
         { error: "a valid alert token is required" },
         { status: 403 },

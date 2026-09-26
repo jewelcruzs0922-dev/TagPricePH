@@ -79,7 +79,14 @@ function day(offset) {
 }
 
 function offer(storeId, price, source, observedAt) {
-  return { storeId, price, source, inStock: true, updatedAt: observedAt };
+  return {
+    storeId,
+    price,
+    source,
+    inStock: true,
+    updatedAt: observedAt,
+    url: `https://www.${storeId === "shopee" ? "shopee.ph" : `${storeId}.example`}/item/${price}`,
+  };
 }
 
 function product(slug, offers) {
@@ -91,6 +98,7 @@ function insertRows(client, rows) {
   return client.query(INSERT_OBSERVATIONS_SQL, [
     rows.map((row) => row.productSlug),
     rows.map((row) => row.storeId),
+    rows.map((row) => row.listingExternalId ?? ""),
     rows.map((row) => toCents(row.price)),
     rows.map((row) => row.availability),
     rows.map((row) => row.source),
@@ -161,6 +169,15 @@ async function main() {
       JSON.stringify(allowed.authorized ? allowed.rows : allowed),
     );
 
+    check(
+      "every planned row carries its listing identity (derived from the URL)",
+      allowed.authorized === true &&
+        allowed.rows.every(
+          (row) => typeof row.listingExternalId === "string" && row.listingExternalId.length > 0,
+        ),
+      JSON.stringify(allowed.authorized ? allowed.rows : allowed),
+    );
+
     const undated = product("__verify-ingest-undated__", [
       offer("shopee", 44990, "live", "not-a-timestamp"),
     ]);
@@ -181,6 +198,7 @@ async function main() {
     const base = {
       productSlug: "__verify-screen__",
       storeId: "shopee",
+      listingExternalId: "/item/45990",
       price: 45990,
       observedAt: day(1),
       availability: "in_stock",
@@ -223,7 +241,9 @@ async function main() {
       JSON.stringify(duplicated.rejected),
     );
 
-    const previous = new Map([[rowKey("__verify-screen__", "shopee"), 45990]]);
+    const previous = new Map([
+      [rowKey("__verify-screen__", "shopee", "/item/45990"), 45990],
+    ]);
     const droppedZero = screenRows([row({ price: 4599 })], previous);
     check(
       "a dropped-zero move (-90%) is refused as implausible",
@@ -257,6 +277,40 @@ async function main() {
         mixedBatch.accepted[0].price === 44990 &&
         mixedBatch.rejected.length === 1,
       JSON.stringify(mixedBatch),
+    );
+
+    console.log("\nListing-scoped screening (Live Data Readiness §4)");
+    const prevA = new Map([[rowKey("__verify-screen__", "shopee", "/seller-a"), 100000]]);
+    const bFirst = screenRows(
+      [row({ listingExternalId: "/seller-b", price: 10000 })],
+      prevA,
+    );
+    check(
+      "Seller B's first reading passes — it is not judged against Seller A's history",
+      bFirst.accepted.length === 1 && bFirst.rejected.length === 0,
+      JSON.stringify(bFirst.rejected),
+    );
+    const aJump = screenRows(
+      [row({ listingExternalId: "/seller-a", price: 10000 })],
+      prevA,
+    );
+    check(
+      "Seller A's own 90% move is still refused",
+      aJump.accepted.length === 0 && aJump.rejected[0]?.reason.includes("down 90%"),
+      JSON.stringify(aJump.rejected),
+    );
+    const instant = new Date().toISOString();
+    const twoSellers = screenRows(
+      [
+        row({ listingExternalId: "/seller-a", price: 40000, observedAt: instant }),
+        row({ listingExternalId: "/seller-b", price: 38000, observedAt: instant }),
+      ],
+      none,
+    );
+    check(
+      "two sellers at one instant are not batch-duplicates of each other",
+      twoSellers.accepted.length === 2 && twoSellers.rejected.length === 0,
+      JSON.stringify(twoSellers.rejected),
     );
 
     console.log("\nSample catalog");
@@ -299,8 +353,8 @@ async function main() {
       );
 
       console.log("\nRead path");
-      const { rows: liveSeries } = await client.query(PRODUCT_SERIES_SQL, [LIVE_SLUG]);
-      const { rows: mixedSeries } = await client.query(PRODUCT_SERIES_SQL, [MIXED_SLUG]);
+      const { rows: liveSeries } = await client.query(PRODUCT_SERIES_SQL, [LIVE_SLUG, true]);
+      const { rows: mixedSeries } = await client.query(PRODUCT_SERIES_SQL, [MIXED_SLUG, true]);
 
       check(
         "an all-live batch yields a series that stays live",

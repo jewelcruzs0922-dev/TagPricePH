@@ -295,7 +295,9 @@ async function databaseChecks(client) {
     const staticProduct = getProductBySlug(slug);
     const [row] = (await client.query(PRODUCT_BY_SLUG_SQL, [slug])).rows;
     const offerRows = (await client.query(OFFERS_FOR_SLUG_SQL, [slug])).rows;
-    const seriesRows = (await client.query(PRODUCT_SERIES_SQL, [slug])).rows;
+    // The series read db-provider runs for a demo product: allow_demo = true
+    // (Live Data Readiness §5 — a live product would pass false here).
+    const seriesRows = (await client.query(PRODUCT_SERIES_SQL, [slug, true])).rows;
     const assembled = row ? assembleProduct(row, offerRows, seriesRows) : null;
 
     check(`${slug} exists in both catalogs`, Boolean(staticProduct) && Boolean(assembled));

@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomBytes } from "node:crypto";
 import { query, queryOne } from "@/lib/db";
+import { alertTokenMatches, hashAlertToken } from "@/lib/security/alert-token";
 import {
   ACTIVE_ALERTS_SQL,
   ALERT_OWNER_SQL,
@@ -61,6 +62,11 @@ export type AlertOwner = {
 export function newAlertToken(): string {
   return randomBytes(24).toString("hex");
 }
+
+// Hashed storage and constant-time verification live in
+// lib/security/alert-token.ts (importable from plain Node); re-exported here
+// for the alert routes, which already load this module.
+export { alertTokenMatches, hashAlertToken };
 
 /**
  * Creates an alert (with the mailbox's token), or retargets the active one
