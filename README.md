@@ -4,8 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-2F6FEB)](LICENSE)
 
 A price comparison and tracking site for the Philippines — compare a product
-across Shopee, Lazada and TikTok Shop, see how its price moved, and get told
-when it drops. Built with Next.js App Router, React 19, TypeScript and
+across Shopee, Lazada and TikTok Shop, see how its price moved, and watch it
+for drops. Built with Next.js App Router, React 19, TypeScript and
 PostgreSQL.
 
 **[Live site](https://tagpriceph.vercel.app)**
@@ -49,7 +49,7 @@ npm run build && npm start   # production
 | ------------------------ | --------------------------------------------------------- |
 | `npm run typecheck`      | `tsc --noEmit`                                            |
 | `npm run lint`           | ESLint (flat config)                                      |
-| `npm run verify`         | typecheck, lint, build, then all 21 verification suites    |
+| `npm run verify`         | typecheck, lint, build, then all 20 verification suites    |
 | `npm run verify:full`    | `verify` plus the recorded-history suite                  |
 | `npm run db:migrate`     | Apply migrations under `db/migrations/`                   |
 | `npm run db:status`      | Show which migrations are applied                         |
@@ -105,10 +105,10 @@ parameterised SQL in `lib/db/*-queries.ts`.
 
 ## Verification
 
-`npm run verify` chains typecheck, lint, a production build, then 21 suites that
+`npm run verify` chains typecheck, lint, a production build, then 20 suites that
 each exercise one concern: trust, db, data, match, backend, typo, observations,
 ingest, views, alerts, admin, catalog, security, hardening, readiness,
-freshness, providers, perf, mobile, recorded history and polish.
+freshness, providers, perf, mobile and polish.
 
 They are plain Node scripts under `scripts/` — no test framework, no browser
 download. Each prints what it checked and exits non-zero on the first failure,
