@@ -59,6 +59,10 @@ body {
   outline-offset: 2px;
 }
 
+input[type="search"]:focus-visible {
+  outline: none;
+}
+
 .container-page {
   width: 100%;
   max-width: 1200px;

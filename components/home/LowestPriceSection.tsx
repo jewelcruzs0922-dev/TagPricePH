@@ -104,8 +104,8 @@ export async function LowestPriceSection({ product }: { product: Product }) {
       aria-labelledby="lowest-price-heading"
       className="container-page scroll-mt-24"
     >
-      <div className="rounded-[28px] bg-accent-panel p-4 sm:p-6 lg:p-7">
-        <div className="mb-4">
+      <div className="rounded-[22px] bg-accent-panel p-3.5 sm:rounded-[28px] sm:p-6 lg:p-7">
+        <div className="mb-3 sm:mb-4">
           <span className="eyebrow-yellow">
             Today&apos;s Best Deal
           </span>
@@ -116,10 +116,10 @@ export async function LowestPriceSection({ product }: { product: Product }) {
           )}
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-[0.85fr_1.1fr_1fr] lg:gap-5">
+        <div className="grid gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-[0.85fr_1.1fr_1fr] lg:gap-5">
           {/* Product card */}
-          <div className="card flex flex-col p-5">
-            <div className="relative h-64 overflow-hidden rounded-2xl bg-[#F3F1EA]">
+          <div className="card flex flex-col p-4 sm:p-5">
+            <div className="relative h-44 overflow-hidden rounded-2xl bg-[#F3F1EA] sm:h-56 lg:h-64">
               <Image
                 src={product.image}
                 alt={product.name}
@@ -130,7 +130,7 @@ export async function LowestPriceSection({ product }: { product: Product }) {
             </div>
             <h2
               id="lowest-price-heading"
-              className="mt-5 text-[22px] font-extrabold tracking-tight text-ink"
+              className="mt-4 text-[18px] font-extrabold tracking-tight text-ink sm:mt-5 sm:text-[22px]"
             >
               {product.name}
             </h2>
@@ -163,12 +163,12 @@ export async function LowestPriceSection({ product }: { product: Product }) {
           </div>
 
           {/* Price + comparison card */}
-          <div className="card flex flex-col gap-4 p-5">
+          <div className="card flex flex-col gap-3 p-4 sm:gap-4 sm:p-5">
             <div className="flex items-start gap-3">
               <span
-                className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${tone.badge}`}
+                className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full sm:h-8 sm:w-8 ${tone.badge}`}
               >
-                <TimingIcon className="h-5 w-5" aria-hidden="true" />
+                <TimingIcon className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />
               </span>
               <div>
                 <p className="text-[15px] font-bold text-ink">{timing.label}</p>
@@ -177,7 +177,7 @@ export async function LowestPriceSection({ product }: { product: Product }) {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <p className="text-[40px] font-extrabold leading-none tracking-tight text-ink sm:text-[44px]">
+              <p className="text-[30px] font-extrabold leading-none tracking-tight text-ink sm:text-[38px] lg:text-[44px]">
                 {lowest ? formatPeso(lowest.price) : "—"}
               </p>
             </div>
@@ -204,7 +204,7 @@ export async function LowestPriceSection({ product }: { product: Product }) {
                   return (
                     <li
                       key={`${offer.storeId}:${offer.listingId ?? offer.url}`}
-                      className="flex items-center gap-2 border-b border-line bg-white px-3.5 py-3 last:border-b-0"
+                      className="flex items-center gap-2 border-b border-line bg-white px-3 py-2.5 last:border-b-0 sm:px-3.5 sm:py-3"
                     >
                       <StoreLogo storeId={offer.storeId} size={32} />
                       {/* Name and badge stack instead of sharing one line:
@@ -239,7 +239,7 @@ export async function LowestPriceSection({ product }: { product: Product }) {
 
             <Link
               href={`/product/${product.slug}`}
-              className="btn-primary mt-auto w-full py-3.5 text-[15px]"
+              className="btn-primary mt-auto w-full py-3 text-[14px] sm:py-3.5 sm:text-[15px]"
             >
               View full comparison
               <ArrowRight className="h-4 w-4" aria-hidden="true" />

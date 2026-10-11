@@ -63,7 +63,7 @@ export default async function PriceDropsPage() {
           actionHref="/categories"
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 sm:gap-4 md:grid-cols-3 lg:grid-cols-4">
           {feed.products.map((product) => (
             <PriceDropCard
               key={product.id}

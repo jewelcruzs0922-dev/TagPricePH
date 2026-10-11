@@ -139,7 +139,7 @@ export function SearchBar({
           autoFocus={autoFocus}
           autoComplete="off"
           placeholder={placeholder}
-          className={`w-full rounded-full border border-line bg-white text-ink placeholder:text-ink-3 shadow-[0_2px_12px_rgba(23,32,51,0.04)] transition focus:border-accent-deep focus:ring-4 focus:ring-accent/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink ${inputSize}`}
+          className={`w-full rounded-full border border-line bg-white text-ink placeholder:text-ink-3 shadow-[0_2px_12px_rgba(23,32,51,0.04)] transition focus:border-accent-deep focus:ring-4 focus:ring-accent/45 focus-visible:outline-none ${inputSize}`}
           onChange={(event) => {
             setQuery(event.target.value);
             setOpen(true);

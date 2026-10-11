@@ -25,7 +25,7 @@ export function PriceDropCard({ product, recorded, titleLevel = "h3" }: PriceDro
 
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-white transition hover:border-[#d9d4c4] hover:shadow-[0_8px_24px_rgba(23,32,51,0.06)]">
-      <div className="relative h-48 overflow-hidden bg-[#F6F4EC]">
+      <div className="relative h-36 overflow-hidden bg-[#F6F4EC] sm:h-48">
         {drop > 0 && (
           <span className="absolute left-3 top-3 z-10 rounded-lg bg-accent px-2.5 py-1 text-[12px] font-bold text-ink">
             -{drop}%
@@ -40,14 +40,14 @@ export function PriceDropCard({ product, recorded, titleLevel = "h3" }: PriceDro
         />
       </div>
 
-      <div className="flex flex-1 flex-col gap-2.5 p-4">
-        <Title className="line-clamp-2 min-h-[42px] text-[15px] font-semibold leading-snug text-ink">
+      <div className="flex flex-1 flex-col gap-2 p-3.5 sm:gap-2.5 sm:p-4">
+        <Title className="line-clamp-2 min-h-[36px] text-[14px] font-semibold leading-snug text-ink sm:min-h-[42px] sm:text-[15px]">
           <Link href={`/product/${product.slug}`} className="hover:underline">
             {product.name}
           </Link>
         </Title>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <p className="text-[22px] font-extrabold tracking-tight text-ink">
+          <p className="text-[19px] font-extrabold tracking-tight text-ink sm:text-[22px]">
             {lowest ? formatPeso(lowest.price) : "—"}
           </p>
           {!recorded && isSampleClaim(product) && product.previousPrice && (
@@ -70,7 +70,7 @@ export function PriceDropCard({ product, recorded, titleLevel = "h3" }: PriceDro
           </span>
           <Link
             href={`/product/${product.slug}`}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line bg-white text-ink transition group-hover:border-ink"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-white text-ink transition group-hover:border-ink sm:h-11 sm:w-11"
             aria-label={`View ${product.name}`}
           >
             <ChevronRight className="h-4 w-4" aria-hidden="true" />

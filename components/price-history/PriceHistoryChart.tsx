@@ -122,7 +122,7 @@ export function PriceHistoryChart({
               type="button"
               role="tab"
               aria-selected={range === item}
-              className={`min-h-11 rounded-full px-3.5 py-1.5 text-[13px] font-bold transition ${
+              className={`min-h-9 rounded-full px-2.5 py-1.5 text-[12px] font-bold transition sm:min-h-11 sm:px-3.5 sm:text-[13px] ${
                 range === item
                   ? "bg-accent text-ink shadow-sm"
                   : "text-ink-2 hover:text-ink"
@@ -161,7 +161,7 @@ export function PriceHistoryChart({
         <div className="relative">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="h-[200px] w-full"
+          className="h-[160px] w-full sm:h-[200px]"
           role="img"
           aria-label={
             current === null
